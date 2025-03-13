@@ -1,0 +1,69 @@
+{
+    "info": {
+      "name": "ThikTreks API",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Register User",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"email\": \"usuario@test.com\",\n  \"password\": \"12345678\",\n  \"displayName\": \"Usuario de Prueba\",\n  \"photoURL\": \"https://example.com/avatar.png\"\n}"
+          },
+          "url": {
+            "raw": "http://localhost:5000/api/users/register",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "port": "5000",
+            "path": [
+              "api",
+              "users",
+              "register"
+            ]
+          }
+        }
+      },
+      {
+        "name": "Get Users (Requires Auth)",
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer {{TOKEN_JWT}}",
+              "type": "text"
+            }
+          ],
+          "url": {
+            "raw": "http://localhost:5000/api/users",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "port": "5000",
+            "path": [
+              "api",
+              "users"
+            ]
+          }
+        }
+      }
+    ],
+    "variable": [
+      {
+        "key": "TOKEN_JWT",
+        "value": "",
+        "type": "string"
+      }
+    ]
+  }
