@@ -50,7 +50,7 @@ const GoogleIcon = () => (
 );
 
 export function SignupForm() {
-  const router = useRouter();
+  const router = useRouter(); // Still needed for /practice-time
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [isGooglePending, startGoogleTransition] = useTransition();
@@ -113,12 +113,13 @@ export function SignupForm() {
         } else {
           toast({
             title: "Google Sign-Up Successful",
-            description: "Account created with Google! Navigating to dashboard...",
+            description: "Account created with Google! Redirecting...",
           });
           console.log("SignupForm: Google Sign-Up and Firestore update successful. Auth state change will trigger navigation.");
-          // No direct router.replace here, rely on AuthContext and HomePage/AppLayout
+          // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
+          // window.location.assign("/dashboard"); // REMOVED
         }
-      } catch (error: any) { // FIXED: Added opening curly brace
+      } catch (error: any) {
         let errorMessage = "Google Sign-Up failed. Please try again.";
          if (error.code === 'auth/popup-closed-by-user') {
           errorMessage = "Sign-up popup closed. Please try again.";
@@ -272,5 +273,4 @@ export function SignupForm() {
     </Card>
   );
 }
-
     

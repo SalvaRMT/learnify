@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+// import { useRouter } from "next/navigation"; // No longer directly needed for redirection
 import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig";
@@ -40,7 +40,7 @@ const GoogleIcon = () => (
 );
 
 export function LoginForm() {
-  const router = useRouter(); // Still need router for other purposes if any, or remove if not used
+  // const router = useRouter(); // No longer directly needed for redirection
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [isGooglePending, startGoogleTransition] = useTransition();
@@ -68,9 +68,10 @@ export function LoginForm() {
         console.log("LoginForm: Login successful. Auth state change will trigger navigation.");
         toast({
           title: "Login Successful",
-          description: result.success + " Redirecting...",
+          description: "Logged in successfully! Redirecting...",
         });
-        // router.replace("/dashboard"); // REMOVED - Rely on AuthContext and HomePage/AppLayout
+        // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
+        // router.replace("/dashboard"); // REMOVED
         // router.refresh(); // REMOVED
       }
     });
@@ -104,8 +105,8 @@ export function LoginForm() {
             title: "Google Sign-In Successful",
             description: "Logged in with Google! Redirecting...",
           });
-          // router.replace("/dashboard"); // REMOVED
-          // router.refresh(); // REMOVED
+          // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
+          // window.location.assign("/dashboard"); // REMOVED
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
