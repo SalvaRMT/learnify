@@ -5,10 +5,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
-// import { useRouter } from "next/navigation"; // No longer directly needed for redirection
 import { useTransition } from "react";
-import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
-import { auth } from "@/lib/firebaseConfig";
+import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { auth } from "@/lib/firebaseConfig"; // Corrected: Direct import of client-side auth
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,8 +21,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions";
+// import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions"; // loginUser no longer directly called by form
+import { ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
+// import { useRouter } from 'next/navigation'; // No longer needed for direct navigation from here
 
 const LoginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
@@ -40,10 +41,9 @@ const GoogleIcon = () => (
 );
 
 export function LoginForm() {
-  // const router = useRouter(); // No longer directly needed for redirection
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition();
-  const [isGooglePending, startGoogleTransition] = useTransition();
+  const [isPending, startTransition] = useTransition(); // For email/pass
+  const [isGooglePending, startGoogleTransition] = useTransition(); // For Google
 
   const form = useForm<z.infer<typeof LoginSchema>>({
     resolver: zodResolver(LoginSchema),
@@ -53,26 +53,39 @@ export function LoginForm() {
     },
   });
 
-  function onSubmit(values: z.infer<typeof LoginSchema>) {
+  async function onSubmit(values: z.infer<typeof LoginSchema>) {
     startTransition(async () => {
-      console.log("LoginForm: Submitting email/password login");
-      const result = await loginUser(values);
-      if (result.error) {
-        toast({
-          title: "Login Failed",
-          description: result.error,
-          variant: "destructive",
-        });
-        console.error("LoginForm: Login failed", result.error);
-      } else {
-        console.log("LoginForm: Login successful. Auth state change will trigger navigation.");
+      console.log("LoginForm: Submitting email/password login (client-side)");
+      try {
+        await signInWithEmailAndPassword(auth, values.email, values.password);
+        console.log("LoginForm: Client-side signInWithEmailAndPassword successful.");
         toast({
           title: "Login Successful",
           description: "Logged in successfully! Redirecting...",
         });
         // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
-        // router.replace("/dashboard"); // REMOVED
-        // router.refresh(); // REMOVED
+      } catch (error: any) {
+        console.error("LoginForm: Client-side signInWithEmailAndPassword failed", error);
+        let errorMessage = "Login failed. Please try again.";
+        if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+          errorMessage = "Invalid email or password.";
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage = "Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later.";
+        } else if (error.code === 'auth/user-disabled') {
+          errorMessage = "This user account has been disabled.";
+        } else if (error.code === 'unavailable') {
+           errorMessage = `Login failed. The service is temporarily unavailable. Please check your internet connection and try again. (Code: ${error.code})`;
+        } else if (error.code === 'auth/operation-not-allowed') {
+           errorMessage = "Email/password sign-in is not enabled. Please contact support.";
+        } else if (error.code === 'auth/network-request-failed') {
+           errorMessage = "Login failed due to a network error. Please check your internet connection.";
+        }
+        // Add more specific Firebase error codes as needed
+        toast({
+          title: "Login Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
       }
     });
   }
@@ -86,6 +99,7 @@ export function LoginForm() {
         const user = userCredential.user;
         console.log("LoginForm: Google Sign-In with popup successful, user UID:", user.uid);
 
+        // Call server action to ensure user exists in Firestore
         const firestoreResult = await ensureGoogleUserInFirestore({
           uid: user.uid,
           email: user.email,
@@ -105,8 +119,7 @@ export function LoginForm() {
             title: "Google Sign-In Successful",
             description: "Logged in with Google! Redirecting...",
           });
-          // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
-          // window.location.assign("/dashboard"); // REMOVED
+          // Navigation is handled by AuthContext and HomePage/AppLayout
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
@@ -116,6 +129,10 @@ export function LoginForm() {
           errorMessage = "An account already exists with this email using a different sign-in method.";
         } else if (error.code === 'auth/operation-not-supported-in-this-environment' || error.code === 'auth/unauthorized-domain') {
             errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings) and ensure it's also in your Google Cloud OAuth client's 'Authorized JavaScript origins'. (Code: ${error.code})`;
+        } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-blocked') {
+            errorMessage = "Google Sign-In popup was blocked or cancelled. Please ensure popups are enabled and try again.";
+        } else if (error.code === 'auth/network-request-failed') {
+            errorMessage = "Google Sign-In failed due to a network error. Please check your internet connection.";
         } else if (error.code === 'auth/configuration-not-found') {
           errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
         } else if (error.message) {
