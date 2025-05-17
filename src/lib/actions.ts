@@ -65,8 +65,17 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
     if (error.code === 'auth/email-already-in-use') {
       return { error: "This email is already in use." };
     }
-    console.error("Sign up error:", error);
-    return { error: "Failed to create account. Please try again." };
+    console.error("Sign up error:", error); // Server-side log for detailed object
+
+    // Provide a more informative error to the client
+    let clientErrorMessage = "Failed to create account. Please try again.";
+    if (error.message) {
+      clientErrorMessage = `Sign up failed: ${error.message}`;
+      if (error.code) {
+        clientErrorMessage += ` (Code: ${error.code})`;
+      }
+    }
+    return { error: clientErrorMessage };
   }
 }
 
@@ -90,7 +99,14 @@ export async function loginUser(values: z.infer<typeof LoginSchema>) {
         return { error: "Invalid email or password." };
     }
     console.error("Login error:", error);
-    return { error: "Failed to login. Please try again." };
+    let clientErrorMessage = "Failed to login. Please try again.";
+    if (error.message) {
+      clientErrorMessage = `Login failed: ${error.message}`;
+      if (error.code) {
+        clientErrorMessage += ` (Code: ${error.code})`;
+      }
+    }
+    return { error: clientErrorMessage };
   }
 }
 
@@ -192,3 +208,4 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
   await new Promise(resolve => setTimeout(resolve, 300));
   return { success: "Practice session recorded!" };
 }
+
