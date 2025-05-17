@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
 import { useTransition } from "react";
-import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig"; // Firebase auth instance for client-side operations
 import { useRouter } from "next/navigation";
 
@@ -22,36 +22,26 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ensureGoogleUserInFirestore } from "@/lib/actions";
+// ensureGoogleUserInFirestore was removed as Google Sign-In functionality was removed.
 import { Loader2 } from "lucide-react";
-import { useAuth } from "@/context/AuthContext"; // Import useAuth
+import { useAuth } from "@/context/AuthContext"; 
 
 const LoginSchema = z.object({
-  email: z.string().email({ message: "Invalid email address." }),
-  password: z.string().min(1, { message: "Password is required." }),
+  email: z.string().email({ message: "Correo electrónico inválido." }),
+  contrasena: z.string().min(1, { message: "La contraseña es obligatoria." }),
 });
-
-const GoogleIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20px" height="20px">
-    <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
-    <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
-    <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
-    <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l0.012-0.012l6.19,5.238C39.302,34.373,44,28.728,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
-  </svg>
-);
 
 export function LoginForm() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const [isGooglePending, startGoogleTransition] = useTransition();
   const router = useRouter();
-  const { handleLoginSuccess } = useAuth(); // Get handleLoginSuccess from context
+  const { handleLoginSuccess } = useAuth(); 
 
   const form = useForm<z.infer<typeof LoginSchema>>({
     resolver: zodResolver(LoginSchema),
     defaultValues: {
       email: "",
-      password: "",
+      contrasena: "",
     },
   });
 
@@ -59,42 +49,42 @@ export function LoginForm() {
     startTransition(async () => {
       console.log("LoginForm: Submitting email/password login (client-side)");
       try {
-        const userCredential = await signInWithEmailAndPassword(auth, values.email, values.password);
+        const userCredential = await signInWithEmailAndPassword(auth, values.email, values.contrasena);
         console.log("LoginForm: Client-side signInWithEmailAndPassword successful. UserCredential:", userCredential);
 
         if (userCredential.user) {
-          await handleLoginSuccess(userCredential.user); // Proactively update AuthContext
+          await handleLoginSuccess(userCredential.user); 
           toast({
-            title: "Login Successful",
-            description: "Redirecting to dashboard...",
+            title: "Inicio de Sesión Exitoso",
+            description: "¡Has iniciado sesión correctamente! Redirigiendo...",
           });
-          router.replace('/dashboard'); // Navigate AFTER context update attempt
+          // No navigation here, relying on AuthContext and page components
         } else {
            console.error("LoginForm: signInWithEmailAndPassword successful but no user in credential.");
-           toast({ title: "Login Failed", description: "An unexpected error occurred.", variant: "destructive" });
+           toast({ title: "Fallo en Inicio de Sesión", description: "Ocurrió un error inesperado.", variant: "destructive" });
         }
       } catch (error: any) {
         console.error("LoginForm: Client-side signInWithEmailAndPassword failed", error);
-        let errorMessage = "Login failed. Please try again.";
+        let errorMessage = "Error al iniciar sesión. Por favor, inténtalo de nuevo.";
         if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-          errorMessage = "Invalid email or password.";
+          errorMessage = "Correo electrónico o contraseña inválidos.";
         } else if (error.code === 'auth/too-many-requests') {
-          errorMessage = "Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later.";
+          errorMessage = "El acceso a esta cuenta ha sido deshabilitado temporalmente debido a muchos intentos fallidos de inicio de sesión. Puedes restaurarlo inmediatamente restableciendo tu contraseña o puedes intentarlo más tarde.";
         } else if (error.code === 'auth/user-disabled') {
-          errorMessage = "This user account has been disabled.";
+          errorMessage = "Esta cuenta de usuario ha sido deshabilitada.";
         } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Login error: This sign-in method isn't allowed for your current setup or domain. Please check Firebase console settings for authorized domains and enabled providers. (Code: ${error.code})`;
+            errorMessage = `Error de inicio de sesión: Este método de inicio de sesión no está permitido para tu configuración o dominio actual. Revisa la configuración de la consola de Firebase para dominios autorizados y proveedores habilitados. (Código: ${error.code})`;
         } else if (error.code === 'auth/network-request-failed') {
-           errorMessage = "Login failed due to a network error. Please check your internet connection.";
+           errorMessage = "Fallo en inicio de sesión debido a un error de red. Por favor, revisa tu conexión a internet.";
         } else if (error.code === 'auth/configuration-not-found') {
-          errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication is enabled and configured in the Firebase console. (Code: ${error.code})`;
-        } else if (error.code === 'permission-denied') { // Firestore specific, if loginUser action was still used
-          errorMessage = "Login successful with Firebase Auth, but failed to retrieve user profile due to Firestore permissions. Please check your Firestore security rules. (Code: permission-denied)";
-        } else if (error.code === 'unavailable') { // Firestore or Auth service unavailable
-           errorMessage = `Login failed. The service is temporarily unavailable. Please check your internet connection and try again. (Code: ${error.code})`;
+          errorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
+        } else if (error.code === 'permission-denied') { 
+          errorMessage = "Inicio de sesión exitoso con Firebase Auth, pero falló al recuperar el perfil de usuario debido a permisos de Firestore. Revisa tus reglas de seguridad de Firestore. (Código: permission-denied)";
+        } else if (error.code === 'unavailable') { 
+           errorMessage = `Fallo en inicio de sesión. El servicio está temporalmente no disponible. Revisa tu conexión a internet e inténtalo de nuevo. (Código: ${error.code})`;
         }
         toast({
-          title: "Login Failed",
+          title: "Fallo en Inicio de Sesión",
           description: errorMessage,
           variant: "destructive",
         });
@@ -102,67 +92,12 @@ export function LoginForm() {
     });
   }
 
-  const handleGoogleSignIn = () => {
-    startGoogleTransition(async () => {
-      console.log("LoginForm: Attempting Google Sign-In (client-side popup)");
-      const provider = new GoogleAuthProvider();
-      try {
-        const userCredential: UserCredential = await signInWithPopup(auth, provider);
-        const firebaseUser = userCredential.user;
-        console.log("LoginForm: Google Sign-In with popup successful, user UID:", firebaseUser.uid);
-
-        // Ensure user data exists in Firestore (this is a server action)
-        const ensureResult = await ensureGoogleUserInFirestore({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          displayName: firebaseUser.displayName,
-        });
-
-        if (ensureResult.error) {
-            toast({ title: "Google Sign-In Error", description: ensureResult.error, variant: "destructive" });
-            return;
-        }
-        
-        await handleLoginSuccess(firebaseUser); // Proactively update AuthContext
-
-        toast({
-          title: "Google Sign-In Successful",
-          description: "Redirecting to dashboard...",
-        });
-        router.replace('/dashboard'); // Navigate AFTER context update attempt
-      } catch (error: any) {     
-        console.error("LoginForm: Google Sign-In failed", error);   
-        let errorMessage = "Google Sign-In failed. Please try again.";
-         if (error.code === 'auth/popup-closed-by-user') {
-          errorMessage = "Sign-in popup closed. Please try again.";
-        } else if (error.code === 'auth/account-exists-with-different-credential') {
-          errorMessage = "An account already exists with this email using a different sign-in method.";
-        } else if (error.code === 'auth/operation-not-supported-in-this-environment' || error.code === 'auth/unauthorized-domain') {
-            errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings) and ensure it's also in your Google Cloud OAuth client's 'Authorized JavaScript origins'. (Code: ${error.code})`;
-        } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-blocked') {
-            errorMessage = "Google Sign-In popup was blocked or cancelled. Please ensure popups are enabled and try again.";
-        } else if (error.code === 'auth/network-request-failed') {
-            errorMessage = "Google Sign-In failed due to a network error. Please check your internet connection.";
-        } else if (error.code === 'auth/configuration-not-found') {
-          errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
-        } else if (error.message) {
-          errorMessage = `Google Sign-In error: ${error.message} (Code: ${error.code})`;
-        }
-        toast({
-          title: "Google Sign-In Failed",
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
-    });
-  };
-
   return (
     <Card className="w-full max-w-md shadow-xl">
       <CardHeader>
-        <CardTitle className="text-3xl font-bold text-center text-primary">Welcome Back!</CardTitle>
+        <CardTitle className="text-3xl font-bold text-center text-primary">¡Bienvenido de Nuevo!</CardTitle>
         <CardDescription className="text-center">
-          Login to continue your learning journey.
+          Inicia sesión para continuar tu aventura de aprendizaje.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -173,9 +108,9 @@ export function LoginForm() {
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
+                  <FormLabel>Correo Electrónico</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="you@example.com" {...field} />
+                    <Input type="email" placeholder="tu@ejemplo.com" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -183,10 +118,10 @@ export function LoginForm() {
             />
             <FormField
               control={form.control}
-              name="password"
+              name="contrasena"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Password</FormLabel>
+                  <FormLabel>Contraseña</FormLabel>
                   <FormControl>
                     <Input type="password" placeholder="••••••••" {...field} />
                   </FormControl>
@@ -194,37 +129,16 @@ export function LoginForm() {
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isPending || isGooglePending}>
+            <Button type="submit" className="w-full" disabled={isPending}>
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Login
+              Iniciar Sesión
             </Button>
           </form>
         </Form>
-
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">
-              Or continue with
-            </span>
-          </div>
-        </div>
-
-        <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isPending || isGooglePending}>
-          {isGooglePending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <GoogleIcon />
-          )}
-          Sign in with Google
-        </Button>
-
         <p className="mt-6 text-center text-sm">
-          Don&apos;t have an account?{" "}
+          ¿No tienes una cuenta?{" "}
           <Link href="/signup" className="font-medium text-primary hover:underline">
-            Sign up
+            Regístrate
           </Link>
         </p>
       </CardContent>
