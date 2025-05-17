@@ -28,11 +28,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true); // Initialize loading to true
 
-  console.log("AuthProvider: Initializing or re-rendering. Initial loading state:", loading, "User:", user?.uid);
+  console.log("AuthProvider: Initializing or re-rendering. Current loading state:", loading, "User:", user?.uid);
 
   const fetchUserProfileCallback = useCallback(async (uid: string) => {
     console.log("AuthContext: fetchUserProfileCallback called for UID:", uid);
-    // setLoading(true); // Optionally set loading true if this is a longer operation triggered independently
     try {
       const userDocRef = doc(db, "users", uid);
       const userDocSnap = await getDoc(userDocRef);
@@ -47,7 +46,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("AuthContext: Error fetching user profile:", error);
       setUserProfile(null);
     }
-    // setLoading(false); // Do not set loading false here if onAuthStateChanged handles the primary loading state
   }, []);
 
 
@@ -57,15 +55,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext: onAuthStateChanged triggered. currentUser: ${currentUser ? currentUser.uid : null}`, "color: blue; font-weight: bold;");
       
       if (currentUser) {
+        setLoading(true); // <<<--- SET LOADING TRUE HERE
         setUser(currentUser);
         await fetchUserProfileCallback(currentUser.uid); // Fetch profile
         console.log(`%cAuthContext: User authenticated and profile fetched. Setting loading to false. User: ${currentUser.uid}`, "color: green; font-weight: bold;");
-        setLoading(false); // Set loading to false after user is set and profile is fetched
+        setLoading(false); // <<<--- SET LOADING FALSE AFTER PROFILE FETCH
       } else {
         setUser(null);
         setUserProfile(null);
         console.log(`%cAuthContext: No currentUser. Setting loading to false.`, "color: red; font-weight: bold;");
-        setLoading(false); // No user, so not loading
+        setLoading(false);
       }
     });
 
@@ -90,3 +89,4 @@ export const useAuth = () => {
   // console.log("useAuth hook: Current context values - User:", context.user?.uid, "Loading:", context.loading, "Profile:", context.userProfile);
   return context;
 };
+
