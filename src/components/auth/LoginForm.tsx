@@ -107,7 +107,11 @@ export function LoginForm() {
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
         } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = "Google Sign-In is not supported in this environment. Please ensure popups are allowed and your app's URL (e.g., http://localhost:9002) is an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID.";
+            errorMessage = `Google Sign-In error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. (Code: ${error.code})`;
+        } else if (error.code === 'auth/unauthorized-domain') {
+            errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings). (Code: ${error.code})`;
+        } else if (error.code === 'auth/configuration-not-found') {
+          errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
         } else if (error.message) {
           errorMessage = `Google Sign-In error: ${error.message} (Code: ${error.code})`;
         }

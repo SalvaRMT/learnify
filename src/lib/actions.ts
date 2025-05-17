@@ -1,3 +1,4 @@
+
 "use server";
 
 import { auth, db } from "@/lib/firebaseConfig";
@@ -6,8 +7,9 @@ import {
   signInWithEmailAndPassword, 
   signOut as firebaseSignOut,
   sendEmailVerification,
+  type UserCredential,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, writeBatch, Timestamp } from "firebase/firestore";
 import { z } from "zod";
 
 const SignUpSchema = z.object({
@@ -29,7 +31,7 @@ const PracticeTimeSchema = z.object({
 
 const ProfileUpdateSchema = z.object({
   fullName: z.string().min(2, "Full name must be at least 2 characters.").optional(),
-  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120.").optional(),
+  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120.").transform(val => val === '' ? undefined : val).optional(),
   gender: z.string().min(1, "Please select a gender.").optional(),
   practiceTime: z.coerce.number().min(5, "Practice time must be at least 5 minutes.").optional(),
 });
@@ -48,8 +50,7 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    // Send verification email
-    // await sendEmailVerification(user); // Uncomment if you want to enforce email verification
+    // await sendEmailVerification(user); // Uncomment to enforce email verification
 
     await setDoc(doc(db, "users", user.uid), {
       uid: user.uid,
@@ -59,11 +60,8 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
       gender,
       createdAt: serverTimestamp(),
       authProvider: "email",
-      // practiceTime will be set in the next step if user proceeds
     });
     
-    // For email sign up, we don't verify email immediately for login, but prompt later.
-    // return { success: "Account created! Please check your email to verify your account.", userId: user.uid };
     return { success: "Account created! You can now set your practice time or login.", userId: user.uid };
   } catch (error: any) {
     let clientErrorMessage = "Failed to create account. Please try again.";
@@ -71,6 +69,10 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
       clientErrorMessage = "This email is already in use. Please try a different email or login.";
     } else if (error.code === 'unavailable') {
       clientErrorMessage = `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})`;
+    } else if (error.code === 'auth/operation-not-allowed') {
+      clientErrorMessage = "Email/password sign-up is not enabled. Please enable it in your Firebase console (Authentication -> Sign-in method).";
+    } else if (error.code === 'auth/configuration-not-found') {
+      clientErrorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication is enabled and configured in the Firebase console. (Code: ${error.code})`;
     } else if (error.message) {
       clientErrorMessage = `Sign up failed: ${error.message}`;
       if (error.code) {
@@ -92,23 +94,29 @@ export async function loginUser(values: z.infer<typeof LoginSchema>) {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const userDocRef = doc(db, "users", userCredential.user.uid);
-    const userDocSnap = await getDoc(userDocRef);
+    const userDocSnap = await getDoc(userDocRef); // This line can trigger permission-denied
 
-    // Email verification check - you can decide if this is strict
+    // Email verification check (optional)
     // if (!userCredential.user.emailVerified && userDocSnap.exists() && userDocSnap.data()?.authProvider === 'email') {
     //   await firebaseSignOut(auth); 
-    //   return { error: "Please verify your email before logging in. A new verification email can be sent if needed." };
+    //   return { error: "Please verify your email before logging in." };
     // }
     return { success: "Logged in successfully!" };
   } catch (error: any) {
     if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         return { error: "Invalid email or password." };
     }
-    if (error.code === 'unavailable') { // Specific check for Firestore unavailability
+    if (error.code === 'unavailable') { // Firestore or Auth service unavailable
         return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})`};
     }
     if (error.code === 'auth/too-many-requests') {
         return { error: "Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later."}
+    }
+    if (error.code === 'auth/configuration-not-found') {
+      return { error: `Firebase Authentication configuration not found for this project. Please ensure Authentication is enabled and configured in the Firebase console. (Code: ${error.code})` };
+    }
+    if (error.code === 'permission-denied') { // Firestore specific
+      return { error: "Login successful with Firebase Auth, but failed to retrieve user profile due to Firestore permissions. Please check your Firestore security rules to allow reads on the 'users/{userId}' path for authenticated users. (Code: permission-denied)" };
     }
     let clientErrorMessage = "Failed to login. Please try again.";
     if (error.message) {
@@ -138,14 +146,13 @@ export async function ensureGoogleUserInFirestore(userData: { uid: string; email
         createdAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
         authProvider: "google",
-        // age, gender, practiceTime will be undefined. User can set these in profile.
+        // age, gender, practiceTime will be undefined initially for Google users.
       });
     } else {
-      // User exists, update last login time and potentially display name if it changed
       await updateDoc(userDocRef, {
         lastLoginAt: serverTimestamp(),
         fullName: displayName || userDocSnap.data()?.fullName || "Google User", 
-        email: email, // In case email associated with Google account changed
+        email: email,
       });
     }
     return { success: "User data ensured in Firestore." };
@@ -153,6 +160,9 @@ export async function ensureGoogleUserInFirestore(userData: { uid: string; email
     console.error("Firestore error for Google user:", error);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
+    }
+    if (error.code === 'permission-denied') {
+      return { error: `Failed to save Google user data to Firestore due to permissions. Please check your Firestore security rules to allow creating/updating documents in 'users/{userId}' for authenticated users. (Code: ${error.code})` };
     }
     return { error: `Failed to save Google user data to Firestore: ${error.message}` };
   }
@@ -163,9 +173,9 @@ export async function signOutUser() {
   try {
     await firebaseSignOut(auth);
     return { success: "Signed out successfully!" };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Sign out error:", error);
-    return { error: "Failed to sign out." };
+    return { error: `Failed to sign out: ${error.message}` };
   }
 }
 
@@ -186,7 +196,10 @@ export async function savePracticeTime(userId: string, values: z.infer<typeof Pr
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
-    return { error: "Failed to save practice time." };
+    if (error.code === 'permission-denied') {
+      return { error: "Failed to save practice time due to Firestore permissions." };
+    }
+    return { error: `Failed to save practice time: ${error.message}` };
   }
 }
 
@@ -197,19 +210,12 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
   }
   
   const dataToUpdate: { [key: string]: any } = {};
-  // Filter out undefined values explicitly, but allow null if schema permits (it doesn't here for optionals)
-  // Allow empty strings for string fields if they are meant to clear the field,
-  // but Zod schema implies min length, so empty strings would fail validation anyway if not optional.
-  // For numbers, coerce.number will turn '' to NaN, which is fine for Zod validation.
-  // Firestore update will skip undefined fields.
-  for (const key in values) {
-    if (values[key as keyof typeof values] !== undefined) {
-      dataToUpdate[key] = values[key as keyof typeof values];
-    }
+  for (const key in validatedFields.data) {
+      const typedKey = key as keyof typeof validatedFields.data;
+      if (validatedFields.data[typedKey] !== undefined) {
+          dataToUpdate[typedKey] = validatedFields.data[typedKey];
+      }
   }
-   // Specifically handle clearing optional numeric fields if they are passed as empty string by form
-   if (dataToUpdate.age === '') dataToUpdate.age = undefined;
-
 
   if (Object.keys(dataToUpdate).length === 0) {
     return { success: "No changes to update." };
@@ -224,7 +230,10 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
-    return { error: "Failed to update profile." };
+     if (error.code === 'permission-denied') {
+      return { error: "Failed to update profile due to Firestore permissions." };
+    }
+    return { error: `Failed to update profile: ${error.message}` };
   }
 }
 
@@ -242,7 +251,10 @@ export async function getUserProfile(userId: string) {
      if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
-    return { error: "Failed to fetch profile." };
+    if (error.code === 'permission-denied') {
+      return { error: "Failed to fetch profile due to Firestore permissions." };
+    }
+    return { error: `Failed to fetch profile: ${error.message}` };
   }
 }
 
@@ -252,35 +264,32 @@ export async function getStudyStreakData(userId: string) {
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
+      // Convert Firestore Timestamps to JS Dates for completedDates
+      const completedDates = (data.completedDates || []).map((ts: any) => {
+        if (ts instanceof Timestamp) {
+          return ts.toDate();
+        }
+        return new Date(ts); // Fallback for other potential formats
+      });
       return {
         currentStreak: data.currentStreak || 0,
         longestStreak: data.longestStreak || 0,
         totalQuestionsAnswered: data.totalQuestionsAnswered || 0,
-        completedDates: (data.completedDates || []).map((ts: any) => ts.toDate ? ts.toDate() : new Date(ts)),
+        completedDates: completedDates,
       };
     } else {
-       // If no streak data, initialize with defaults
       return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
     }
   } catch(error: any) {
     console.error("Error fetching streak data:", error);
-    if (error.code === 'unavailable') {
-      // Potentially return a specific error object or rethrow if critical
-       // For now, returning default structure to prevent UI breakage, but with an error logged
-      console.error(`${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})`);
+    if (error.code === 'unavailable' || error.code === 'permission-denied') {
+      console.error(`Firestore error (Code: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
     }
-    // Fallback mock data if no real data or error to prevent UI breaking
-    return {
-      currentStreak: 0,
-      longestStreak: 0,
-      totalQuestionsAnswered: 0,
-      completedDates: [],
-    };
+    return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
 
 export async function getPracticeQuestions() {
-  // This is a mock. In a real app, fetch from a DB or GenAI.
   await new Promise(resolve => setTimeout(resolve, 50)); 
   return [
     { id: 'q1', topic: 'History', question: 'Who was the first President of the United States?', options: ['Abraham Lincoln', 'George Washington', 'Thomas Jefferson', 'John Adams'], correctAnswer: 'George Washington' },
@@ -298,7 +307,7 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
   }
   try {
     const today = new Date();
-    today.setHours(0,0,0,0); // Normalize to start of day for consistent date comparison
+    today.setHours(0,0,0,0); 
 
     const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
     const dailyRecordRef = doc(db, "users", userId, "dailyProgress", today.toISOString().split('T')[0]);
@@ -311,27 +320,23 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
       longestStreak = 0, 
       totalQuestionsAnswered = 0, 
       lastPracticeDate = null, // Firestore Timestamp or null
-      completedDates = [] // Array of Firestore Timestamps
+      completedDates = [] // Array of Firestore Timestamps or JS Dates
     } = summarySnap.exists() ? summarySnap.data() : {};
     
-    // Convert Firestore Timestamp to JS Date if necessary
     let jsLastPracticeDate: Date | null = null;
-    if (lastPracticeDate && typeof lastPracticeDate.toDate === 'function') {
-      jsLastPracticeDate = lastPracticeDate.toDate();
-      jsLastPracticeDate.setHours(0,0,0,0); // Normalize for comparison
+    if (lastPracticeDate) {
+      jsLastPracticeDate = (lastPracticeDate instanceof Timestamp) ? lastPracticeDate.toDate() : new Date(lastPracticeDate);
+      jsLastPracticeDate.setHours(0,0,0,0);
     }
-
 
     if (jsLastPracticeDate) {
       const dayDifference = (today.getTime() - jsLastPracticeDate.getTime()) / (1000 * 3600 * 24);
       if (dayDifference === 1) {
         currentStreak += 1;
       } else if (dayDifference > 1) {
-        currentStreak = 1; // Reset streak
+        currentStreak = 1; 
       }
-      // If dayDifference is 0, it means practice already recorded today, streak doesn't increase further here.
     } else {
-      // No previous practice, start streak at 1
       currentStreak = 1;
     }
 
@@ -340,32 +345,21 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
     }
     totalQuestionsAnswered += questionsAnswered;
     
-    // Add today to completedDates if not already there
-    const todayTimestamp = serverTimestamp(); // Use serverTimestamp for consistency if writing new
     const todayDateStr = today.toISOString().split('T')[0];
+    const processedCompletedDates = completedDates.map((d: any) => 
+      d instanceof Timestamp ? d.toDate() : new Date(d)
+    );
 
-    // Convert existing completedDates (Timestamps) to string representations for comparison
-    const completedDateStrings = completedDates.map((d: any) => {
-      if (d.toDate) return d.toDate().toISOString().split('T')[0];
-      if (d instanceof Date) return d.toISOString().split('T')[0];
-      return new Date(d).toISOString().split('T')[0]; // Fallback if it's already a string/number
-    });
-
-    let newCompletedDates = [...completedDates];
-    if (!completedDateStrings.includes(todayDateStr)) {
-        // If adding today, and it's a new record, use a Firestore Timestamp
-        // For simplicity, if we are sure 'today' is the date, we can add it as a JS Date
-        // which Firestore will convert to Timestamp on write.
-        newCompletedDates.push(today); 
+    if (!processedCompletedDates.some(d => d.toISOString().split('T')[0] === todayDateStr)) {
+        processedCompletedDates.push(today); 
     }
-
 
     batch.set(streakSummaryRef, {
       currentStreak,
       longestStreak,
       totalQuestionsAnswered,
-      lastPracticeDate: today, // Store as JS Date, Firestore converts to Timestamp
-      completedDates: newCompletedDates 
+      lastPracticeDate: Timestamp.fromDate(today), 
+      completedDates: processedCompletedDates.map(d => Timestamp.fromDate(d)) 
     }, { merge: true });
 
     const dailyProgressSnap = await getDoc(dailyRecordRef);
@@ -374,7 +368,7 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
     batch.set(dailyRecordRef, {
       questionsAnswered: existingDailyQuestions + questionsAnswered,
       topics: topicsCovered, 
-      date: today, // Store as JS Date
+      date: Timestamp.fromDate(today),
     }, { merge: true });
 
     await batch.commit();
@@ -385,7 +379,11 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
      if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
+    if (error.code === 'permission-denied') {
+      return { error: `Failed to record session due to Firestore permissions. (Code: ${error.code})` };
+    }
     return { error: `Failed to record session: ${error.message}` };
   }
 }
 
+    
