@@ -7,10 +7,10 @@ import {
   signInWithEmailAndPassword, 
   signOut as firebaseSignOut,
   sendEmailVerification,
-  GoogleAuthProvider,
-  signInWithPopup
+  // GoogleAuthProvider, // No longer used for server-side signInWithPopup
+  // signInWithPopup // No longer used server-side for Google
 } from "firebase/auth";
-import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { z } from "zod";
 
 const SignUpSchema = z.object({
@@ -57,13 +57,12 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
       fullName,
       age,
       gender,
-      createdAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
       authProvider: "email",
     });
     
     return { success: "Account created! Please check your email to verify your account.", userId: user.uid };
   } catch (error: any) {
-    console.error("Sign up error object:", error);
     let clientErrorMessage = "Failed to create account. Please try again.";
     if (error.message) {
       clientErrorMessage = `Sign up failed: ${error.message}`;
@@ -85,21 +84,16 @@ export async function loginUser(values: z.infer<typeof LoginSchema>) {
 
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    if (!userCredential.user.emailVerified) {
-      const userEmail = userCredential.user.email;
-      // Check if this user was created with Google provider. Google provider users might not have emailVerified set to true by Firebase in the same way.
-      const userDocRef = doc(db, "users", userCredential.user.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      if (userDocSnap.exists() && userDocSnap.data()?.authProvider === 'google') {
-        // If user signed up with Google, let them log in
-         return { success: "Logged in successfully!" };
-      }
+    const userDocRef = doc(db, "users", userCredential.user.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (!userCredential.user.emailVerified && userDocSnap.exists() && userDocSnap.data()?.authProvider === 'email') {
       await firebaseSignOut(auth); 
       return { error: "Please verify your email before logging in." };
     }
+    // For Google users or verified email users
     return { success: "Logged in successfully!" };
   } catch (error: any) {
-    console.error("Login error object:", error);
     if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         return { error: "Invalid email or password." };
     }
@@ -114,55 +108,38 @@ export async function loginUser(values: z.infer<typeof LoginSchema>) {
   }
 }
 
-export async function signInWithGoogle() {
-  const provider = new GoogleAuthProvider();
+export async function ensureGoogleUserInFirestore(userData: { uid: string; email: string | null; displayName: string | null; }) {
+  const { uid, email, displayName } = userData;
+  if (!uid || !email) {
+    return { error: "User UID or Email is missing for Firestore operation."}
+  }
   try {
-    const userCredential = await signInWithPopup(auth, provider);
-    const user = userCredential.user;
-
-    const userDocRef = doc(db, "users", user.uid);
+    const userDocRef = doc(db, "users", uid);
     const userDocSnap = await getDoc(userDocRef);
 
     if (!userDocSnap.exists()) {
-      // New user via Google
       await setDoc(userDocRef, {
-        uid: user.uid,
-        email: user.email,
-        fullName: user.displayName || "Google User",
-        // age, gender, practiceTime will be undefined initially for Google users
-        // They can set it in their profile.
-        createdAt: new Date().toISOString(),
+        uid: uid,
+        email: email,
+        fullName: displayName || "Google User",
+        createdAt: serverTimestamp(),
         authProvider: "google",
+        // age, gender, practiceTime will be undefined initially. User can set these in profile.
       });
     } else {
-      // Existing user, update last login or other relevant info if necessary
       await updateDoc(userDocRef, {
-        lastLoginAt: new Date().toISOString(),
-        // Optionally update fullName and email if they changed in Google profile
-        fullName: user.displayName || userDocSnap.data()?.fullName || "Google User",
-        email: user.email, 
+        lastLoginAt: serverTimestamp(),
+        fullName: displayName || userDocSnap.data()?.fullName || "Google User", // Update if display name changed
+        email: email, // Update if email changed
       });
     }
-    return { success: "Logged in with Google successfully!" };
+    return { success: "User data ensured in Firestore." };
   } catch (error: any) {
-    console.error("Google Sign-In error object:", error);
-    // Handle specific Google Sign-In errors
-    if (error.code === 'auth/popup-closed-by-user') {
-      return { error: "Sign-in popup closed. Please try again." };
-    }
-    if (error.code === 'auth/account-exists-with-different-credential') {
-        return { error: "An account already exists with this email address using a different sign-in method. Try logging in with that method."};
-    }
-    let clientErrorMessage = "Failed to sign in with Google. Please try again.";
-    if (error.message) {
-      clientErrorMessage = `Google Sign-In failed: ${error.message}`;
-      if (error.code) {
-        clientErrorMessage += ` (Code: ${error.code})`;
-      }
-    }
-    return { error: clientErrorMessage };
+    console.error("Firestore error for Google user:", error);
+    return { error: `Failed to save Google user data to Firestore: ${error.message}` };
   }
 }
+
 
 export async function signOutUser() {
   try {
@@ -192,17 +169,27 @@ export async function savePracticeTime(userId: string, values: z.infer<typeof Pr
   }
 }
 
-export async function updateUserProfile(userId: string, values: z.infer<typeof ProfileUpdateSchema>) {
-  const validatedFields = ProfileUpdateSchema.safeParse(values);
+export async function updateUserProfile(userId: string, values: Partial<z.infer<typeof ProfileUpdateSchema>>) {
+  // Note: Using Partial here as values might not contain all fields from ProfileUpdateSchema
+  const validatedFields = ProfileUpdateSchema.partial().safeParse(values);
   if (!validatedFields.success) {
     return { error: "Invalid fields.", details: validatedFields.error.flatten().fieldErrors };
   }
   
-  const dataToUpdate = validatedFields.data;
-  Object.keys(dataToUpdate).forEach(key => dataToUpdate[key as keyof typeof dataToUpdate] === undefined && delete dataToUpdate[key as keyof typeof dataToUpdate]);
+  const dataToUpdate = { ...validatedFields.data }; // Clone to avoid mutating original
+  Object.keys(dataToUpdate).forEach(keyStr => {
+    const key = keyStr as keyof typeof dataToUpdate;
+    if (dataToUpdate[key] === undefined || dataToUpdate[key] === '') {
+      // For Firestore, to remove a field, you might need to use deleteField()
+      // or simply not include it in the update if it's truly optional.
+      // For now, we'll just remove undefined or empty strings from the update object.
+      delete dataToUpdate[key];
+    }
+  });
+
 
   if (Object.keys(dataToUpdate).length === 0) {
-    return { error: "No changes provided." };
+    return { success: "No changes to update." }; // Or error: "No changes provided."
   }
 
   try {
@@ -232,17 +219,34 @@ export async function getUserProfile(userId: string) {
 
 // Mock actions for streaks and calendar data
 export async function getStudyStreakData(userId: string) {
-  await new Promise(resolve => setTimeout(resolve, 500)); 
+  // Simulate Firestore access for a specific user
+  const userDocRef = doc(db, "users", userId, "streaks", "summary");
+  try {
+    const docSnap = await getDoc(userDocRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        currentStreak: data.currentStreak || 0,
+        longestStreak: data.longestStreak || 0,
+        totalQuestionsAnswered: data.totalQuestionsAnswered || 0,
+        // Ensure completedDates are an array of Date objects
+        completedDates: (data.completedDates || []).map((ts: any) => ts.toDate ? ts.toDate() : new Date(ts)),
+      };
+    }
+  } catch(e) { /* ignore, will return mock data */ }
+
+  // Fallback mock data if no real data or error
+  await new Promise(resolve => setTimeout(resolve, 100)); 
   return {
-    currentStreak: Math.floor(Math.random() * 30),
-    longestStreak: Math.floor(Math.random() * 100) + 30,
-    totalQuestionsAnswered: Math.floor(Math.random() * 1000),
-    completedDates: [new Date(), new Date(Date.now() - 86400000 * 2), new Date(Date.now() - 86400000 * 3)], 
+    currentStreak: Math.floor(Math.random() * 10),
+    longestStreak: Math.floor(Math.random() * 20) + 5,
+    totalQuestionsAnswered: Math.floor(Math.random() * 100),
+    completedDates: [new Date(Date.now() - 86400000 * Math.floor(Math.random()*5) )], 
   };
 }
 
 export async function getPracticeQuestions() {
-  await new Promise(resolve => setTimeout(resolve, 500)); 
+  await new Promise(resolve => setTimeout(resolve, 100)); 
   return [
     { id: 'q1', topic: 'History', question: 'Who was the first President of the United States?', options: ['Abraham Lincoln', 'George Washington', 'Thomas Jefferson', 'John Adams'], correctAnswer: 'George Washington' },
     { id: 'q2', topic: 'Science', question: 'What is the chemical symbol for water?', options: ['H2O', 'O2', 'CO2', 'NaCl'], correctAnswer: 'H2O' },
@@ -254,8 +258,69 @@ export async function getPracticeQuestions() {
 
 export async function recordPracticeSession(userId: string, questionsAnswered: number, topicsCovered: string[]) {
   console.log(`User ${userId} answered ${questionsAnswered} questions on topics: ${topicsCovered.join(', ')}`);
-  await new Promise(resolve => setTimeout(resolve, 300));
-  return { success: "Practice session recorded!" };
-}
+  // Example: Update user's streak and total questions in Firestore
+  try {
+    const today = new Date();
+    today.setHours(0,0,0,0); // Normalize to start of day
 
+    const userDocRef = doc(db, "users", userId);
+    const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
+    const dailyRecordRef = doc(db, "users", userId, "dailyProgress", today.toISOString().split('T')[0]);
+
+    const summarySnap = await getDoc(streakSummaryRef);
+    let { 
+      currentStreak = 0, 
+      longestStreak = 0, 
+      totalQuestionsAnswered = 0, 
+      lastPracticeDate = null,
+      completedDates = [] 
+    } = summarySnap.exists() ? summarySnap.data() : {};
+
+    if (lastPracticeDate && typeof lastPracticeDate.toDate === 'function') {
+      lastPracticeDate = lastPracticeDate.toDate();
+    } else if (lastPracticeDate) {
+      lastPracticeDate = new Date(lastPracticeDate);
+    }
+
+
+    const dayDifference = lastPracticeDate ? (today.getTime() - lastPracticeDate.getTime()) / (1000 * 3600 * 24) : Infinity;
+
+    if (dayDifference === 1) {
+      currentStreak += 1;
+    } else if (dayDifference > 1 || !lastPracticeDate) {
+      currentStreak = 1; // Reset or start new streak
+    }
+    // If dayDifference is 0, it means practice already recorded today, streak doesn't change.
+
+    if (currentStreak > longestStreak) {
+      longestStreak = currentStreak;
+    }
+    totalQuestionsAnswered += questionsAnswered;
     
+    const todayStr = today.toISOString();
+    if (!completedDates.some((d:any) => (d.toDate ? d.toDate().toISOString() : new Date(d).toISOString()) === todayStr)) {
+        completedDates.push(today);
+    }
+
+
+    await setDoc(streakSummaryRef, {
+      currentStreak,
+      longestStreak,
+      totalQuestionsAnswered,
+      lastPracticeDate: today,
+      completedDates 
+    }, { merge: true });
+
+    await setDoc(dailyRecordRef, {
+      questionsAnswered: (await getDoc(dailyRecordRef)).exists() ? 
+        (await getDoc(dailyRecordRef)).data()!.questionsAnswered + questionsAnswered : questionsAnswered,
+      topics: topicsCovered, // Could merge with existing topics for the day
+      date: today,
+    }, { merge: true });
+
+    return { success: "Practice session recorded!" };
+  } catch (error: any) {
+    console.error("Error recording practice session:", error);
+    return { error: `Failed to record session: ${error.message}` };
+  }
+}

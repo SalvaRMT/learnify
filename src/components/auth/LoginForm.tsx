@@ -7,6 +7,8 @@ import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
+import { auth } from "@/lib/firebaseConfig";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { loginUser, signInWithGoogle } from "@/lib/actions";
+import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
 
 const LoginSchema = z.object({
@@ -61,32 +63,59 @@ export function LoginForm() {
           variant: "destructive",
         });
       } else {
+        router.replace("/dashboard"); 
+        router.refresh(); 
         toast({
           title: "Login Successful",
           description: result.success,
         });
-        router.push("/dashboard"); 
-        router.refresh(); 
       }
     });
   }
 
   const handleGoogleSignIn = () => {
     startGoogleTransition(async () => {
-      const result = await signInWithGoogle();
-      if (result.error) {
+      const provider = new GoogleAuthProvider();
+      try {
+        const userCredential: UserCredential = await signInWithPopup(auth, provider);
+        const user = userCredential.user;
+
+        const firestoreResult = await ensureGoogleUserInFirestore({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+        });
+
+        if (firestoreResult.error) {
+          toast({
+            title: "Google Sign-In Error",
+            description: `Could not save user data: ${firestoreResult.error}`,
+            variant: "destructive",
+          });
+        } else {
+          router.replace("/dashboard");
+          router.refresh();
+          toast({
+            title: "Google Sign-In Successful",
+            description: "Logged in with Google!",
+          });
+        }
+      } catch (error: any) {
+        let errorMessage = "Google Sign-In failed. Please try again.";
+        if (error.code === 'auth/popup-closed-by-user') {
+          errorMessage = "Sign-in popup closed. Please try again.";
+        } else if (error.code === 'auth/account-exists-with-different-credential') {
+          errorMessage = "An account already exists with this email using a different sign-in method.";
+        } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
+            errorMessage = "Google Sign-In is not supported in this environment. Please ensure popups are allowed and your app's URL (e.g., http://localhost:9002) is an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID.";
+        } else if (error.message) {
+          errorMessage = `Google Sign-In error: ${error.message} (Code: ${error.code})`;
+        }
         toast({
           title: "Google Sign-In Failed",
-          description: result.error,
+          description: errorMessage,
           variant: "destructive",
         });
-      } else {
-        toast({
-          title: "Google Sign-In Successful",
-          description: result.success,
-        });
-        router.push("/dashboard");
-        router.refresh();
       }
     });
   };
@@ -165,5 +194,4 @@ export function LoginForm() {
     </Card>
   );
 }
-
     

@@ -7,6 +7,9 @@ import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
+import { auth } from "@/lib/firebaseConfig";
+
 
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +30,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { signUpUser, signInWithGoogle } from "@/lib/actions";
+import { signUpUser, ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
 
 const SignUpSchema = z.object({
@@ -57,7 +60,7 @@ export function SignupForm() {
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
       fullName: "",
-      age: '', 
+      age: '' as unknown as number, // Keep controlled with empty string, coerce handles number
       gender: "",
       email: "",
       password: "",
@@ -78,7 +81,6 @@ export function SignupForm() {
           title: "Sign Up Successful",
           description: result.success,
         });
-        // For email/password signup, still redirect to practice time
         router.push(`/practice-time?userId=${result.userId}`);
       }
     });
@@ -86,21 +88,47 @@ export function SignupForm() {
 
   const handleGoogleSignUp = () => {
     startGoogleTransition(async () => {
-      const result = await signInWithGoogle(); // Use the same action for sign-up/sign-in
-      if (result.error) {
+      const provider = new GoogleAuthProvider();
+      try {
+        const userCredential: UserCredential = await signInWithPopup(auth, provider);
+        const user = userCredential.user;
+
+        const firestoreResult = await ensureGoogleUserInFirestore({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+        });
+
+        if (firestoreResult.error) {
+           toast({
+            title: "Google Sign-Up Error",
+            description: `Could not save user data: ${firestoreResult.error}`,
+            variant: "destructive",
+          });
+        } else {
+          router.replace("/dashboard");
+          router.refresh();
+          toast({
+            title: "Google Sign-Up Successful",
+            description: "Account created with Google!",
+          });
+        }
+      } catch (error: any) {
+        let errorMessage = "Google Sign-Up failed. Please try again.";
+         if (error.code === 'auth/popup-closed-by-user') {
+          errorMessage = "Sign-up popup closed. Please try again.";
+        } else if (error.code === 'auth/account-exists-with-different-credential') {
+          errorMessage = "An account already exists with this email using a different sign-in method.";
+        } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
+            errorMessage = "Google Sign-Up is not supported in this environment. Please ensure popups are allowed and your app's URL (e.g., http://localhost:9002) is an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID.";
+        } else if (error.message) {
+          errorMessage = `Google Sign-Up error: ${error.message} (Code: ${error.code})`;
+        }
         toast({
           title: "Google Sign-Up Failed",
-          description: result.error,
+          description: errorMessage,
           variant: "destructive",
         });
-      } else {
-        toast({
-          title: "Google Sign-Up Successful",
-          description: result.success,
-        });
-        // For Google sign-up, user is already "logged in", go to dashboard
-        router.push("/dashboard");
-        router.refresh(); // Ensure auth state is picked up
       }
     });
   };
@@ -141,8 +169,8 @@ export function SignupForm() {
                       type="number" 
                       placeholder="25" 
                       {...field} 
-                      onChange={e => field.onChange(e.target.value)} 
-                      value={field.value === undefined ? '' : field.value} 
+                      onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))} 
+                      value={field.value === undefined || field.value === null ? '' : field.value} 
                     />
                   </FormControl>
                   <FormMessage />
@@ -155,7 +183,7 @@ export function SignupForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Gender</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select gender" />
@@ -236,5 +264,3 @@ export function SignupForm() {
     </Card>
   );
 }
-
-    
