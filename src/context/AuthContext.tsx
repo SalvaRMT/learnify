@@ -26,50 +26,51 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true); // Initialize loading to true
+  const [loading, setLoading] = useState(true); 
 
-  console.log("AuthProvider: Initializing or re-rendering. Current loading state:", loading, "User:", user?.uid);
+  console.log(`%cAuthProvider: Render/Re-render. Loading: ${loading}, User: ${user ? user.uid : null}`, "color: orange;");
 
   const fetchUserProfileCallback = useCallback(async (uid: string) => {
-    console.log("AuthContext: fetchUserProfileCallback called for UID:", uid);
+    console.log(`%cAuthContext: fetchUserProfileCallback called for UID: ${uid}`, "color: blue;");
     try {
       const userDocRef = doc(db, "users", uid);
       const userDocSnap = await getDoc(userDocRef);
       if (userDocSnap.exists()) {
-        console.log("AuthContext: Profile found:", userDocSnap.data());
+        console.log(`%cAuthContext: Profile found for ${uid}:`, "color: blue;", userDocSnap.data());
         setUserProfile(userDocSnap.data() as UserProfile);
       } else {
-        console.log("AuthContext: Profile not found for UID:", uid);
+        console.warn(`%cAuthContext: Profile NOT found for UID: ${uid}`, "color: yellow;");
         setUserProfile(null);
       }
     } catch (error) {
-      console.error("AuthContext: Error fetching user profile:", error);
+      console.error(`%cAuthContext: Error fetching user profile for ${uid}:`, "color: red;", error);
       setUserProfile(null);
     }
   }, []);
 
 
   useEffect(() => {
-    console.log("AuthContext: useEffect for onAuthStateChanged is running.");
+    console.log("%cAuthContext: useEffect for onAuthStateChanged REGISTERED.", "color: green;");
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log(`%cAuthContext: onAuthStateChanged triggered. currentUser: ${currentUser ? currentUser.uid : null}`, "color: blue; font-weight: bold;");
+      console.log(`%cAuthContext: onAuthStateChanged FIRED. currentUser: ${currentUser ? currentUser.uid : 'null'}`, "color: green; font-weight: bold;");
       
       if (currentUser) {
-        setLoading(true); // <<<--- SET LOADING TRUE HERE
+        console.log(`%cAuthContext: currentUser detected (${currentUser.uid}). Setting loading = true.`, "color: green;");
+        setLoading(true); 
         setUser(currentUser);
-        await fetchUserProfileCallback(currentUser.uid); // Fetch profile
-        console.log(`%cAuthContext: User authenticated and profile fetched. Setting loading to false. User: ${currentUser.uid}`, "color: green; font-weight: bold;");
-        setLoading(false); // <<<--- SET LOADING FALSE AFTER PROFILE FETCH
+        await fetchUserProfileCallback(currentUser.uid);
+        console.log(`%cAuthContext: Profile fetch complete for ${currentUser.uid}. Setting loading = false.`, "color: green;");
+        setLoading(false);
       } else {
+        console.log("%cAuthContext: No currentUser from onAuthStateChanged. Setting user to null, profile to null, loading = false.", "color: green;");
         setUser(null);
         setUserProfile(null);
-        console.log(`%cAuthContext: No currentUser. Setting loading to false.`, "color: red; font-weight: bold;");
         setLoading(false);
       }
     });
 
     return () => {
-      console.log("AuthContext: Unsubscribing from onAuthStateChanged.");
+      console.log("%cAuthContext: Unsubscribing from onAuthStateChanged.", "color: green;");
       unsubscribe();
     };
   }, [fetchUserProfileCallback]);
@@ -89,4 +90,3 @@ export const useAuth = () => {
   // console.log("useAuth hook: Current context values - User:", context.user?.uid, "Loading:", context.loading, "Profile:", context.userProfile);
   return context;
 };
-

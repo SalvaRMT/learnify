@@ -40,7 +40,7 @@ const GoogleIcon = () => (
 );
 
 export function LoginForm() {
-  const router = useRouter();
+  const router = useRouter(); // Still need router for other purposes if any, or remove if not used
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [isGooglePending, startGoogleTransition] = useTransition();
@@ -65,13 +65,13 @@ export function LoginForm() {
         });
         console.error("LoginForm: Login failed", result.error);
       } else {
-        console.log("LoginForm: Login successful, attempting to redirect to /dashboard");
-        router.replace("/dashboard");
-        // router.refresh(); // Removed to let onAuthStateChanged handle state propagation
+        console.log("LoginForm: Login successful. Auth state change will trigger navigation.");
         toast({
           title: "Login Successful",
-          description: result.success,
+          description: result.success + " Redirecting...",
         });
+        // router.replace("/dashboard"); // REMOVED - Rely on AuthContext and HomePage/AppLayout
+        // router.refresh(); // REMOVED
       }
     });
   }
@@ -99,13 +99,13 @@ export function LoginForm() {
           });
           console.error("LoginForm: Google Sign-In Firestore error", firestoreResult.error);
         } else {
-          console.log("LoginForm: Google Sign-In and Firestore update successful, attempting to redirect to /dashboard");
-          router.replace("/dashboard");
-          // router.refresh(); // Removed
+          console.log("LoginForm: Google Sign-In and Firestore update successful. Auth state change will trigger navigation.");
           toast({
             title: "Google Sign-In Successful",
-            description: "Logged in with Google!",
+            description: "Logged in with Google! Redirecting...",
           });
+          // router.replace("/dashboard"); // REMOVED
+          // router.refresh(); // REMOVED
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
@@ -113,10 +113,8 @@ export function LoginForm() {
           errorMessage = "Sign-in popup closed. Please try again.";
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
-        } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Google Sign-In error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. Please check Firebase console > Authentication > Settings > Authorized domains and Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs (Web client). (Code: ${error.code})`;
-        } else if (error.code === 'auth/unauthorized-domain') {
-            errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings). (Code: ${error.code})`;
+        } else if (error.code === 'auth/operation-not-supported-in-this-environment' || error.code === 'auth/unauthorized-domain') {
+            errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings) and ensure it's also in your Google Cloud OAuth client's 'Authorized JavaScript origins'. (Code: ${error.code})`;
         } else if (error.code === 'auth/configuration-not-found') {
           errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
         } else if (error.message) {

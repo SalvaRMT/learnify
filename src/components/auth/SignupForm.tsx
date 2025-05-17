@@ -80,11 +80,10 @@ export function SignupForm() {
       } else {
         toast({
           title: "Sign Up Successful",
-          description: result.success,
+          description: result.success + " Proceed to set practice time.",
         });
         console.log("SignupForm: Sign-up successful, redirecting to /practice-time");
-        router.replace(`/practice-time?userId=${result.userId}`);
-        // router.refresh(); // Removed
+        router.replace(`/practice-time?userId=${result.userId}`); 
       }
     });
   }
@@ -114,22 +113,19 @@ export function SignupForm() {
         } else {
           toast({
             title: "Google Sign-Up Successful",
-            description: "Account created with Google!",
+            description: "Account created with Google! Navigating to dashboard...",
           });
-          console.log("SignupForm: Google Sign-Up and Firestore update successful, attempting to redirect to /dashboard");
-          router.replace("/dashboard"); 
-          // router.refresh(); // Removed
+          console.log("SignupForm: Google Sign-Up and Firestore update successful. Auth state change will trigger navigation.");
+          // No direct router.replace here, rely on AuthContext and HomePage/AppLayout
         }
-      } catch (error: any) {
+      } catch (error: any) { // FIXED: Added opening curly brace
         let errorMessage = "Google Sign-Up failed. Please try again.";
          if (error.code === 'auth/popup-closed-by-user') {
           errorMessage = "Sign-up popup closed. Please try again.";
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
-        } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Google Sign-Up error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. Please check Firebase console > Authentication > Settings > Authorized domains and Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs (Web client). (Code: ${error.code})`;
-        } else if (error.code === 'auth/unauthorized-domain') {
-            errorMessage = `Google Sign-Up error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings). (Code: ${error.code})`;
+        } else if (error.code === 'auth/operation-not-supported-in-this-environment' || error.code === 'auth/unauthorized-domain') {
+            errorMessage = `Google Sign-Up error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings) and ensure it's also in your Google Cloud OAuth client's 'Authorized JavaScript origins'. (Code: ${error.code})`;
         } else if (error.code === 'auth/configuration-not-found') {
           errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
         } else if (error.message) {
@@ -276,3 +272,5 @@ export function SignupForm() {
     </Card>
   );
 }
+
+    
