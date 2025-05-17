@@ -58,7 +58,7 @@ export function ProfileForm() {
     resolver: zodResolver(ProfileUpdateSchema),
     defaultValues: {
       fullName: "",
-      age: undefined,
+      age: '', // Changed from undefined
       gender: "",
       practiceTime: 15,
     },
@@ -68,11 +68,11 @@ export function ProfileForm() {
     if (userProfile) {
       form.reset({
         fullName: userProfile.fullName || "",
-        age: userProfile.age || undefined,
+        age: userProfile.age === undefined || userProfile.age === null ? '' : userProfile.age, // Ensure '' if no age
         gender: userProfile.gender || "",
         practiceTime: userProfile.practiceTime || 15,
       });
-    } else if (user && !authLoading) { // Fetch if userProfile is null but user exists
+    } else if (user && !authLoading) { 
         startLoadingProfileTransition(async () => {
             await fetchUserProfile(user.uid);
         });
@@ -82,13 +82,46 @@ export function ProfileForm() {
 
   function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
+
+    // Filter out empty strings for optional fields before sending for update
+    // Zod's coerce will turn empty string for age to NaN, which might not be what we want to send for "no change"
+    const dataToUpdate: Partial<z.infer<typeof ProfileUpdateSchema>> = {};
+    if (values.fullName) dataToUpdate.fullName = values.fullName;
+    if (values.age !== undefined && values.age !== null && String(values.age).trim() !== '') {
+         dataToUpdate.age = Number(values.age);
+    } else if (form.formState.dirtyFields.age && values.age === undefined) { // If explicitly cleared and was optional
+        dataToUpdate.age = undefined; // Or however you signify removal for optional field
+    }
+
+
+    if (values.gender) dataToUpdate.gender = values.gender;
+    if (values.practiceTime) dataToUpdate.practiceTime = values.practiceTime;
+    
+    // Ensure age is truly optional if not provided or cleared.
+    // If age in form is '', coerce.number might make it NaN.
+    // We only want to update if there's a valid number or it's explicitly being set/cleared based on schema.
+    const finalValues: any = { ...values };
+    if (finalValues.age === '' || finalValues.age === null || Number.isNaN(finalValues.age)) {
+      // If the field is optional and empty/NaN, don't send it unless it was initially set
+      // This logic can be tricky depending on desired behavior for "clearing" an optional number
+      if (userProfile?.age !== undefined && (finalValues.age === '' || finalValues.age === null)) {
+        // If user had an age and cleared it, send undefined to remove it (if backend supports)
+        // For now, we only send it if it's a valid number or part of the schema
+        finalValues.age = undefined; 
+      } else if (Number.isNaN(finalValues.age)) {
+        finalValues.age = undefined;
+      }
+    }
+
+
     startUpdateTransition(async () => {
-      const result = await updateUserProfile(user.uid, values);
+      // Use finalValues which has age potentially set to undefined if it was empty string
+      const result = await updateUserProfile(user.uid, finalValues);
       if (result.error) {
         toast({ title: "Update Failed", description: result.error, variant: "destructive" });
       } else {
         toast({ title: "Profile Updated", description: result.success });
-        await fetchUserProfile(user.uid); // Re-fetch profile after update
+        await fetchUserProfile(user.uid); 
       }
     });
   }
@@ -101,7 +134,7 @@ export function ProfileForm() {
       } else {
         toast({ title: "Signed Out", description: result.success });
         router.push("/login");
-        router.refresh(); // To ensure auth state is cleared everywhere
+        router.refresh(); 
       }
     });
   };
@@ -135,7 +168,7 @@ export function ProfileForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Full Name</FormLabel>
-                  <FormControl><Input placeholder="Your full name" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Your full name" {...field} value={field.value || ""} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )}
@@ -147,7 +180,15 @@ export function ProfileForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Age</FormLabel>
-                    <FormControl><Input type="number" placeholder="Your age" {...field} onChange={e => field.onChange(parseInt(e.target.value,10) || undefined)} /></FormControl>
+                    <FormControl>
+                      <Input 
+                        type="number" 
+                        placeholder="Your age" 
+                        {...field} 
+                        onChange={e => field.onChange(e.target.value)} // Pass string value
+                        value={field.value === undefined || field.value === null ? '' : field.value} // Ensure value is not undefined/null
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

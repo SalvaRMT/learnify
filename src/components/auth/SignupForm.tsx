@@ -47,7 +47,7 @@ export function SignupForm() {
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
       fullName: "",
-      age: undefined,
+      age: '', // Changed from undefined
       gender: "",
       email: "",
       password: "",
@@ -105,7 +105,13 @@ export function SignupForm() {
                 <FormItem>
                   <FormLabel>Age</FormLabel>
                   <FormControl>
-                    <Input type="number" placeholder="25" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10) || undefined)} />
+                    <Input 
+                      type="number" 
+                      placeholder="25" 
+                      {...field} 
+                      onChange={e => field.onChange(e.target.value)} // Pass string value
+                      value={field.value === undefined ? '' : field.value} // Ensure value is not undefined
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
