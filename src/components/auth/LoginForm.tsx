@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
 import { useTransition } from "react";
-import { signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig"; // Firebase auth instance for client-side operations
 import { useRouter } from "next/navigation";
 
@@ -53,12 +53,17 @@ export function LoginForm() {
         console.log("LoginForm: Client-side signInWithEmailAndPassword successful. UserCredential:", userCredential);
 
         if (userCredential.user) {
+          // Proactively update AuthContext
           await handleLoginSuccess(userCredential.user); 
+          
           toast({
             title: "Inicio de Sesión Exitoso",
             description: "¡Has iniciado sesión correctamente! Redirigiendo...",
           });
-          // No navigation here, relying on AuthContext and page components
+          // Navigation is handled by AuthContext and page components reacting to state change
+          // Forcing a dashboard navigation here, after context update.
+          router.replace("/dashboard");
+
         } else {
            console.error("LoginForm: signInWithEmailAndPassword successful but no user in credential.");
            toast({ title: "Fallo en Inicio de Sesión", description: "Ocurrió un error inesperado.", variant: "destructive" });
