@@ -35,8 +35,8 @@ import { Loader2 } from "lucide-react";
 
 const SignUpSchema = z.object({
   fullName: z.string().min(2, "Full name must be at least 2 characters."),
-  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120."),
-  gender: z.string().min(1, "Please select a gender."),
+  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120.").optional().or(z.literal('')),
+  gender: z.string().min(1, "Please select a gender.").optional(),
   email: z.string().email("Invalid email address."),
   password: z.string().min(6, "Password must be at least 6 characters."),
 });
@@ -60,7 +60,7 @@ export function SignupForm() {
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
       fullName: "",
-      age: '' as unknown as number, 
+      age: '', 
       gender: "",
       email: "",
       password: "",
@@ -81,7 +81,10 @@ export function SignupForm() {
           title: "Sign Up Successful",
           description: result.success,
         });
-        router.push(`/practice-time?userId=${result.userId}`);
+        // For email/password signup, we still go to practice-time
+        if (typeof window !== "undefined") {
+           window.location.assign(`/practice-time?userId=${result.userId}`);
+        }
       }
     });
   }
@@ -106,12 +109,13 @@ export function SignupForm() {
             variant: "destructive",
           });
         } else {
-          router.replace("/dashboard");
-          router.refresh();
           toast({
             title: "Google Sign-Up Successful",
             description: "Account created with Google!",
           });
+          if (typeof window !== "undefined") {
+            window.location.assign("/dashboard");
+          }
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-Up failed. Please try again.";
@@ -120,7 +124,7 @@ export function SignupForm() {
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
         } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Google Sign-Up error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. (Code: ${error.code})`;
+            errorMessage = `Google Sign-Up error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. Please check Firebase console > Authentication > Settings > Authorized domains and Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs (Web client). (Code: ${error.code})`;
         } else if (error.code === 'auth/unauthorized-domain') {
             errorMessage = `Google Sign-Up error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings). (Code: ${error.code})`;
         } else if (error.code === 'auth/configuration-not-found') {
@@ -173,7 +177,7 @@ export function SignupForm() {
                       type="number" 
                       placeholder="25" 
                       {...field} 
-                      onChange={e => field.onChange(e.target.value)} 
+                      onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
                       value={field.value === undefined || field.value === null ? '' : field.value} 
                     />
                   </FormControl>
@@ -187,7 +191,7 @@ export function SignupForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Gender</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value || ""}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value || ""} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select gender" />
@@ -269,3 +273,4 @@ export function SignupForm() {
   );
 }
 
+    

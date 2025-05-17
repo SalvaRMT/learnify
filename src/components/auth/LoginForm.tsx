@@ -63,12 +63,13 @@ export function LoginForm() {
           variant: "destructive",
         });
       } else {
-        router.replace("/dashboard"); 
-        router.refresh(); 
         toast({
           title: "Login Successful",
           description: result.success,
         });
+        if (typeof window !== "undefined") {
+          window.location.assign("/dashboard");
+        }
       }
     });
   }
@@ -93,12 +94,13 @@ export function LoginForm() {
             variant: "destructive",
           });
         } else {
-          router.replace("/dashboard");
-          router.refresh();
           toast({
             title: "Google Sign-In Successful",
             description: "Logged in with Google!",
           });
+          if (typeof window !== "undefined") {
+            window.location.assign("/dashboard");
+          }
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
@@ -107,7 +109,7 @@ export function LoginForm() {
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
         } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Google Sign-In error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. (Code: ${error.code})`;
+            errorMessage = `Google Sign-In error: ${error.message}. This can happen if popups are blocked or your app's URL (e.g., http://localhost:9002) is not an Authorized JavaScript Origin in your Google Cloud/Firebase project settings for the OAuth client ID. Please check Firebase console > Authentication > Settings > Authorized domains and Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs (Web client). (Code: ${error.code})`;
         } else if (error.code === 'auth/unauthorized-domain') {
             errorMessage = `Google Sign-In error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings). (Code: ${error.code})`;
         } else if (error.code === 'auth/configuration-not-found') {
