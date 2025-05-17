@@ -45,33 +45,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (error) {
       console.error(`%cAuthContext: Error fetching user profile for ${uid}:`, "color: red;", error);
-      setUserProfile(null); // Reset profile on error
+      setUserProfile(null);
     }
   }, []);
 
 
   useEffect(() => {
-    console.log("%cAuthContext: useEffect for onAuthStateChanged REGISTERING.", "color: green;");
+    console.log(`%cAuthContext useEffect: Subscribing to onAuthStateChanged. Initial loading state: ${loading}`, "color: orange;");
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log(`%cAuthContext: onAuthStateChanged FIRED. currentUser: ${currentUser ? currentUser.uid : 'null'}`, "color: green; font-weight: bold;");
+      console.log(`%cAuthContext onAuthStateChanged: FIRED. currentUser: ${currentUser ? currentUser.uid : 'null'}`, "color: green; font-weight: bold;");
       
       if (currentUser) {
         setUser(currentUser); // Set user immediately
         await fetchUserProfileCallback(currentUser.uid); // Fetch profile
-        console.log(`%cAuthContext: User ${currentUser.uid} detected and profile fetch attempt complete. Setting loading = false.`, "color: green;");
+        console.log(`%cAuthContext onAuthStateChanged: User ${currentUser.uid} processed, profile fetch attempted.`, "color: green;");
       } else {
         setUser(null);
         setUserProfile(null);
-        console.log("%cAuthContext: No currentUser from onAuthStateChanged. User and profile set to null. Setting loading = false.", "color: green;");
+        console.log("%cAuthContext onAuthStateChanged: No currentUser. User and profile set to null.", "color: green;");
       }
-      setLoading(false); // Set loading to false after initial check and potential profile fetch
+      // This ensures loading is set to false only after the first auth state check is complete
+      // and any associated user data fetching (like profile) is attempted.
+      setLoading(false); 
+      console.log(`%cAuthContext onAuthStateChanged: Setting loading to false. Final user state: ${currentUser ? currentUser.uid : 'null'}`, "color: blue; font-weight: bold;");
     });
 
     return () => {
-      console.log("%cAuthContext: Unsubscribing from onAuthStateChanged.", "color: green;");
+      console.log("%cAuthContext useEffect: Unsubscribing from onAuthStateChanged.", "color: orange;");
       unsubscribe();
     };
-  }, [fetchUserProfileCallback]);
+  }, [fetchUserProfileCallback]); // fetchUserProfileCallback is memoized with useCallback
 
   return (
     <AuthContext.Provider value={{ user, userProfile, loading, fetchUserProfile: fetchUserProfileCallback }}>
@@ -87,4 +90,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

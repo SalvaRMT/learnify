@@ -7,7 +7,8 @@ import { z } from "zod";
 import Link from "next/link";
 import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
-import { auth } from "@/lib/firebaseConfig"; // Corrected: Direct import of client-side auth
+import { auth } from "@/lib/firebaseConfig";
+import { useRouter } from "next/navigation"; // Keep for potential future use if needed
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,10 +22,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-// import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions"; // loginUser no longer directly called by form
 import { ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
-// import { useRouter } from 'next/navigation'; // No longer needed for direct navigation from here
 
 const LoginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
@@ -42,8 +41,9 @@ const GoogleIcon = () => (
 
 export function LoginForm() {
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition(); // For email/pass
-  const [isGooglePending, startGoogleTransition] = useTransition(); // For Google
+  const [isPending, startTransition] = useTransition();
+  const [isGooglePending, startGoogleTransition] = useTransition();
+  const router = useRouter(); // Kept for potential future use, but not for direct navigation on login success
 
   const form = useForm<z.infer<typeof LoginSchema>>({
     resolver: zodResolver(LoginSchema),
@@ -58,12 +58,12 @@ export function LoginForm() {
       console.log("LoginForm: Submitting email/password login (client-side)");
       try {
         await signInWithEmailAndPassword(auth, values.email, values.password);
-        console.log("LoginForm: Client-side signInWithEmailAndPassword successful.");
+        console.log("LoginForm: Client-side signInWithEmailAndPassword successful. Auth state change will trigger navigation.");
         toast({
           title: "Login Successful",
-          description: "Logged in successfully! Redirecting...",
+          description: "You will be redirected shortly.",
         });
-        // Navigation is now handled by AuthContext and HomePage/AppLayout reacting to state changes
+        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects.
       } catch (error: any) {
         console.error("LoginForm: Client-side signInWithEmailAndPassword failed", error);
         let errorMessage = "Login failed. Please try again.";
@@ -79,8 +79,9 @@ export function LoginForm() {
            errorMessage = "Email/password sign-in is not enabled. Please contact support.";
         } else if (error.code === 'auth/network-request-failed') {
            errorMessage = "Login failed due to a network error. Please check your internet connection.";
+        } else if (error.code === 'permission-denied') {
+          errorMessage = "Login failed due to a permissions issue. Please check your Firestore security rules. (Code: permission-denied)";
         }
-        // Add more specific Firebase error codes as needed
         toast({
           title: "Login Failed",
           description: errorMessage,
@@ -99,28 +100,18 @@ export function LoginForm() {
         const user = userCredential.user;
         console.log("LoginForm: Google Sign-In with popup successful, user UID:", user.uid);
 
-        // Call server action to ensure user exists in Firestore
-        const firestoreResult = await ensureGoogleUserInFirestore({
+        await ensureGoogleUserInFirestore({
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
         });
-
-        if (firestoreResult.error) {
-          toast({
-            title: "Google Sign-In Error",
-            description: `Could not save user data: ${firestoreResult.error}`,
-            variant: "destructive",
-          });
-          console.error("LoginForm: Google Sign-In Firestore error", firestoreResult.error);
-        } else {
-          console.log("LoginForm: Google Sign-In and Firestore update successful. Auth state change will trigger navigation.");
-          toast({
-            title: "Google Sign-In Successful",
-            description: "Logged in with Google! Redirecting...",
-          });
-          // Navigation is handled by AuthContext and HomePage/AppLayout
-        }
+        
+        console.log("LoginForm: Google Sign-In and Firestore update successful. Auth state change will trigger navigation.");
+        toast({
+          title: "Google Sign-In Successful",
+          description: "You will be redirected shortly.",
+        });
+        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects.
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
         if (error.code === 'auth/popup-closed-by-user') {

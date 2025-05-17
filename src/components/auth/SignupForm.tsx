@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, type UserCredential } from "firebase/auth";
-import { auth, db } from "@/lib/firebaseConfig"; // Corrected: Direct import of client-side auth
+import { auth, db } from "@/lib/firebaseConfig";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 
@@ -31,7 +31,6 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-// import { signUpUser, ensureGoogleUserInFirestore } from "@/lib/actions"; // signUpUser no longer directly called by form
 import { ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
 
@@ -55,8 +54,8 @@ const GoogleIcon = () => (
 export function SignupForm() {
   const router = useRouter();
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition(); // For email/pass
-  const [isGooglePending, startGoogleTransition] = useTransition(); // For Google
+  const [isPending, startTransition] = useTransition();
+  const [isGooglePending, startGoogleTransition] = useTransition();
 
   const form = useForm<z.infer<typeof SignUpSchema>>({
     resolver: zodResolver(SignUpSchema),
@@ -76,14 +75,12 @@ export function SignupForm() {
         const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
         const user = userCredential.user;
 
-        // await sendEmailVerification(user); // Optional: if you want email verification
-
         await setDoc(doc(db, "users", user.uid), {
           uid: user.uid,
           email: user.email,
           fullName: values.fullName,
-          age: values.age === '' ? undefined : values.age, // Store undefined if age is empty
-          gender: values.gender || undefined, // Store undefined if gender is empty
+          age: values.age === '' ? undefined : Number(values.age),
+          gender: values.gender || undefined,
           createdAt: serverTimestamp(),
           authProvider: "email",
         });
@@ -130,29 +127,21 @@ export function SignupForm() {
         const user = userCredential.user;
         console.log("SignupForm: Google Sign-Up with popup successful, user UID:", user.uid);
 
-        // Call server action to ensure user exists in Firestore
-        const firestoreResult = await ensureGoogleUserInFirestore({
+        await ensureGoogleUserInFirestore({
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
         });
 
-        if (firestoreResult.error) {
-           toast({
-            title: "Google Sign-Up Error",
-            description: `Could not save user data: ${firestoreResult.error}`,
-            variant: "destructive",
-          });
-          console.error("SignupForm: Google Sign-Up Firestore error", firestoreResult.error);
-        } else {
-          toast({
-            title: "Google Sign-Up Successful",
-            description: "Account created with Google! Redirecting...",
-          });
-          console.log("SignupForm: Google Sign-Up and Firestore update successful. Auth state change will trigger navigation.");
-          // Navigation is handled by AuthContext and HomePage/AppLayout
-        }
-      } catch (error: any) {        
+        toast({
+          title: "Google Sign-Up Successful",
+          description: "Account created with Google! You will be redirected shortly.",
+        });
+        console.log("SignupForm: Google Sign-Up and Firestore update successful. Auth state change will trigger navigation.");
+        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects for redirection after Google sign-up.
+        // The page-level useEffect in signup/page.tsx or HomePage.tsx should redirect to /dashboard.
+      } catch (error: any) {     
+        console.error("SignupForm: Google Sign-Up failed", error);   
         let errorMessage = "Google Sign-Up failed. Please try again.";
          if (error.code === 'auth/popup-closed-by-user') {
           errorMessage = "Sign-up popup closed. Please try again.";
@@ -174,7 +163,6 @@ export function SignupForm() {
           description: errorMessage,
           variant: "destructive",
         });
-        console.error("SignupForm: Google Sign-Up failed", error);
       }
     });
   };
@@ -310,4 +298,3 @@ export function SignupForm() {
     </Card>
   );
 }
-    
