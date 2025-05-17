@@ -1,13 +1,10 @@
 
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
+import { getAuth, type Auth } from "firebase/auth";
+import { getFirestore, type Firestore } from "firebase/firestore";
 import { getAnalytics, type Analytics } from "firebase/analytics";
 
 // Your web app's Firebase configuration directly provided.
-// IMPORTANT: For production, it's highly recommended to use environment variables
-// (e.g., process.env.NEXT_PUBLIC_FIREBASE_API_KEY) and a .env.local file
-// to keep your credentials secure and not hardcoded in the source code.
 const firebaseConfig = {
   apiKey: "AIzaSyAl_saXELNCG9P9hYhFWX0GUZ1GqdGuYn8",
   authDomain: "learnify-207f4.firebaseapp.com",
@@ -18,40 +15,31 @@ const firebaseConfig = {
   measurementId: "G-2XJQHDRT8H"
 };
 
-// Initialize Firebase
-let app;
-let analytics: Analytics | null = null;
+let app: FirebaseApp;
 
-if (typeof window !== 'undefined' && !getApps().length) {
+// Initialize Firebase app only once
+if (!getApps().length) {
   app = initializeApp(firebaseConfig);
-  analytics = getAnalytics(app);
-} else if (typeof window !== 'undefined') {
-  app = getApp();
-  // Ensure analytics is initialized if app already exists client-side
-  // This might not be strictly necessary if getAnalytics is idempotent or handles this,
-  // but it's safer to ensure it's initialized with the existing app instance.
-  try {
-    analytics = getAnalytics(app);
-  } catch (e) {
-    console.warn("Firebase Analytics could not be initialized on existing app instance:", e);
-  }
 } else {
-  // Fallback for server-side rendering if needed, though client-side init is typical for these services
-  // For server-side, a different initialization (Admin SDK) is usually used.
-  // This client SDK setup is primarily for the browser.
-  // If getApps() is used server-side and returns [], initializeApp would run.
-  // If it's not the first init server-side, getApp() would be used.
-  // However, auth/db/analytics are typically client-side.
-  if (!getApps().length) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApp();
+  app = getApp(); // Use the existing app if already initialized
+}
+
+const authInstance: Auth = getAuth(app);
+const dbInstance: Firestore = getFirestore(app);
+let analyticsInstance: Analytics | null = null;
+
+if (typeof window !== 'undefined') {
+  // Initialize Analytics only on the client side
+  // Ensure it's only called once per app instance as well
+  try {
+    analyticsInstance = getAnalytics(app);
+  } catch (e) {
+    // console.warn("Firebase Analytics could not be initialized or already initialized:", e);
+    // It's possible getAnalytics throws if called multiple times on the same app instance,
+    // or if some conditions aren't met. This catch is to prevent app crash.
+    // If analytics is crucial, further investigation on the specific error 'e' would be needed.
   }
 }
 
-
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-export { app, auth, db, analytics };
-
+// Exporting renamed instances to avoid potential naming conflicts with firebase module itself in some contexts
+export { app, authInstance as auth, dbInstance as db, analyticsInstance as analytics };
