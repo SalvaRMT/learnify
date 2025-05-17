@@ -11,7 +11,6 @@ import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, ty
 import { auth, db } from "@/lib/firebaseConfig";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -33,6 +32,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext"; // Import useAuth
 
 const SignUpSchema = z.object({
   fullName: z.string().min(2, "Full name must be at least 2 characters."),
@@ -56,6 +56,7 @@ export function SignupForm() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [isGooglePending, startGoogleTransition] = useTransition();
+  const { handleLoginSuccess } = useAuth(); // Get handleLoginSuccess from context
 
   const form = useForm<z.infer<typeof SignUpSchema>>({
     resolver: zodResolver(SignUpSchema),
@@ -73,11 +74,11 @@ export function SignupForm() {
       console.log("SignupForm: Submitting email/password sign-up (client-side)");
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
-        const user = userCredential.user;
+        const firebaseUser = userCredential.user;
 
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          email: user.email,
+        await setDoc(doc(db, "users", firebaseUser.uid), {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
           fullName: values.fullName,
           age: values.age === '' ? undefined : Number(values.age),
           gender: values.gender || undefined,
@@ -86,11 +87,14 @@ export function SignupForm() {
         });
         
         console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore.");
+        
+        // For email signup, we still want to go to practice-time, not directly update AuthContext with handleLoginSuccess yet.
+        // AuthContext will pick up the user via onAuthStateChanged when they eventually log in.
         toast({
           title: "Sign Up Successful",
           description: "Account created! Proceed to set practice time.",
         });
-        router.replace(`/practice-time?userId=${user.uid}`); 
+        router.replace(`/practice-time?userId=${firebaseUser.uid}`); 
       } catch (error: any) {
         console.error("SignupForm: Client-side createUserWithEmailAndPassword failed", error);
         let errorMessage = "Failed to create account. Please try again.";
@@ -98,10 +102,8 @@ export function SignupForm() {
           errorMessage = "This email is already in use. Please try a different email or login.";
         } else if (error.code === 'auth/weak-password') {
           errorMessage = "The password is too weak. Please choose a stronger password.";
-        } else if (error.code === 'unavailable') {
-          errorMessage = `Sign up failed. The service is temporarily unavailable. Please check your internet connection and try again. (Code: ${error.code})`;
-        } else if (error.code === 'auth/operation-not-allowed') {
-          errorMessage = "Email/password sign-up is not enabled. Please contact support.";
+        } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-supported-in-this-environment') {
+            errorMessage = `Sign-up error: This sign-up method isn't allowed for your current setup or domain. Please check Firebase console settings for authorized domains and enabled providers. (Code: ${error.code})`;
         } else if (error.code === 'auth/network-request-failed') {
            errorMessage = "Sign up failed due to a network error. Please check your internet connection.";
         } else if (error.code === 'auth/configuration-not-found') {
@@ -124,22 +126,28 @@ export function SignupForm() {
       const provider = new GoogleAuthProvider();
       try {
         const userCredential: UserCredential = await signInWithPopup(auth, provider);
-        const user = userCredential.user;
-        console.log("SignupForm: Google Sign-Up with popup successful, user UID:", user.uid);
+        const firebaseUser = userCredential.user;
+        console.log("SignupForm: Google Sign-Up with popup successful, user UID:", firebaseUser.uid);
 
-        await ensureGoogleUserInFirestore({
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
+        const ensureResult = await ensureGoogleUserInFirestore({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
         });
+
+        if (ensureResult.error) {
+            toast({ title: "Google Sign-Up Error", description: ensureResult.error, variant: "destructive" });
+            return;
+        }
+
+        await handleLoginSuccess(firebaseUser); // Proactively update AuthContext
 
         toast({
           title: "Google Sign-Up Successful",
-          description: "Account created with Google! You will be redirected shortly.",
+          description: "Account created with Google! Redirecting to dashboard...",
         });
-        console.log("SignupForm: Google Sign-Up and Firestore update successful. Auth state change will trigger navigation.");
-        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects for redirection after Google sign-up.
-        // The page-level useEffect in signup/page.tsx or HomePage.tsx should redirect to /dashboard.
+        router.replace('/dashboard'); // Navigate AFTER context update attempt
+
       } catch (error: any) {     
         console.error("SignupForm: Google Sign-Up failed", error);   
         let errorMessage = "Google Sign-Up failed. Please try again.";

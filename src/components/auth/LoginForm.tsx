@@ -7,8 +7,8 @@ import { z } from "zod";
 import Link from "next/link";
 import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
-import { auth } from "@/lib/firebaseConfig";
-import { useRouter } from "next/navigation"; // Keep for potential future use if needed
+import { auth } from "@/lib/firebaseConfig"; // Firebase auth instance for client-side operations
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext"; // Import useAuth
 
 const LoginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
@@ -43,7 +44,8 @@ export function LoginForm() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [isGooglePending, startGoogleTransition] = useTransition();
-  const router = useRouter(); // Kept for potential future use, but not for direct navigation on login success
+  const router = useRouter();
+  const { handleLoginSuccess } = useAuth(); // Get handleLoginSuccess from context
 
   const form = useForm<z.infer<typeof LoginSchema>>({
     resolver: zodResolver(LoginSchema),
@@ -57,13 +59,20 @@ export function LoginForm() {
     startTransition(async () => {
       console.log("LoginForm: Submitting email/password login (client-side)");
       try {
-        await signInWithEmailAndPassword(auth, values.email, values.password);
-        console.log("LoginForm: Client-side signInWithEmailAndPassword successful. Auth state change will trigger navigation.");
-        toast({
-          title: "Login Successful",
-          description: "You will be redirected shortly.",
-        });
-        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects.
+        const userCredential = await signInWithEmailAndPassword(auth, values.email, values.password);
+        console.log("LoginForm: Client-side signInWithEmailAndPassword successful. UserCredential:", userCredential);
+
+        if (userCredential.user) {
+          await handleLoginSuccess(userCredential.user); // Proactively update AuthContext
+          toast({
+            title: "Login Successful",
+            description: "Redirecting to dashboard...",
+          });
+          router.replace('/dashboard'); // Navigate AFTER context update attempt
+        } else {
+           console.error("LoginForm: signInWithEmailAndPassword successful but no user in credential.");
+           toast({ title: "Login Failed", description: "An unexpected error occurred.", variant: "destructive" });
+        }
       } catch (error: any) {
         console.error("LoginForm: Client-side signInWithEmailAndPassword failed", error);
         let errorMessage = "Login failed. Please try again.";
@@ -73,14 +82,16 @@ export function LoginForm() {
           errorMessage = "Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later.";
         } else if (error.code === 'auth/user-disabled') {
           errorMessage = "This user account has been disabled.";
-        } else if (error.code === 'unavailable') {
-           errorMessage = `Login failed. The service is temporarily unavailable. Please check your internet connection and try again. (Code: ${error.code})`;
-        } else if (error.code === 'auth/operation-not-allowed') {
-           errorMessage = "Email/password sign-in is not enabled. Please contact support.";
+        } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-supported-in-this-environment') {
+            errorMessage = `Login error: This sign-in method isn't allowed for your current setup or domain. Please check Firebase console settings for authorized domains and enabled providers. (Code: ${error.code})`;
         } else if (error.code === 'auth/network-request-failed') {
            errorMessage = "Login failed due to a network error. Please check your internet connection.";
-        } else if (error.code === 'permission-denied') {
-          errorMessage = "Login failed due to a permissions issue. Please check your Firestore security rules. (Code: permission-denied)";
+        } else if (error.code === 'auth/configuration-not-found') {
+          errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication is enabled and configured in the Firebase console. (Code: ${error.code})`;
+        } else if (error.code === 'permission-denied') { // Firestore specific, if loginUser action was still used
+          errorMessage = "Login successful with Firebase Auth, but failed to retrieve user profile due to Firestore permissions. Please check your Firestore security rules. (Code: permission-denied)";
+        } else if (error.code === 'unavailable') { // Firestore or Auth service unavailable
+           errorMessage = `Login failed. The service is temporarily unavailable. Please check your internet connection and try again. (Code: ${error.code})`;
         }
         toast({
           title: "Login Failed",
@@ -97,24 +108,32 @@ export function LoginForm() {
       const provider = new GoogleAuthProvider();
       try {
         const userCredential: UserCredential = await signInWithPopup(auth, provider);
-        const user = userCredential.user;
-        console.log("LoginForm: Google Sign-In with popup successful, user UID:", user.uid);
+        const firebaseUser = userCredential.user;
+        console.log("LoginForm: Google Sign-In with popup successful, user UID:", firebaseUser.uid);
 
-        await ensureGoogleUserInFirestore({
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
+        // Ensure user data exists in Firestore (this is a server action)
+        const ensureResult = await ensureGoogleUserInFirestore({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
         });
+
+        if (ensureResult.error) {
+            toast({ title: "Google Sign-In Error", description: ensureResult.error, variant: "destructive" });
+            return;
+        }
         
-        console.log("LoginForm: Google Sign-In and Firestore update successful. Auth state change will trigger navigation.");
+        await handleLoginSuccess(firebaseUser); // Proactively update AuthContext
+
         toast({
           title: "Google Sign-In Successful",
-          description: "You will be redirected shortly.",
+          description: "Redirecting to dashboard...",
         });
-        // DO NOT NAVIGATE HERE. Rely on AuthContext and page-level useEffects.
-      } catch (error: any) {
+        router.replace('/dashboard'); // Navigate AFTER context update attempt
+      } catch (error: any) {     
+        console.error("LoginForm: Google Sign-In failed", error);   
         let errorMessage = "Google Sign-In failed. Please try again.";
-        if (error.code === 'auth/popup-closed-by-user') {
+         if (error.code === 'auth/popup-closed-by-user') {
           errorMessage = "Sign-in popup closed. Please try again.";
         } else if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method.";
@@ -134,7 +153,6 @@ export function LoginForm() {
           description: errorMessage,
           variant: "destructive",
         });
-        console.error("LoginForm: Google Sign-In failed", error);
       }
     });
   };

@@ -5,13 +5,16 @@ import type { User as FirebaseUser } from "firebase/auth";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { auth, db } from '@/lib/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, Timestamp } from "firebase/firestore";
 
 interface UserProfile {
   fullName?: string;
   age?: number;
   gender?: string;
   practiceTime?: number;
+  createdAt?: Timestamp | Date;
+  lastLoginAt?: Timestamp | Date;
+  authProvider?: string;
 }
 
 interface AuthContextType {
@@ -19,6 +22,7 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   loading: boolean;
   fetchUserProfile: (uid: string) => Promise<void>;
+  handleLoginSuccess: (firebaseUser: FirebaseUser) => Promise<void>; // New function
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,6 +36,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchUserProfileCallback = useCallback(async (uid: string) => {
     console.log(`%cAuthContext: fetchUserProfileCallback called for UID: ${uid}`, "color: blue;");
+    if (!uid) {
+      console.warn("%cAuthContext: fetchUserProfileCallback called with no UID.", "color: yellow;");
+      setUserProfile(null);
+      return;
+    }
     try {
       const userDocRef = doc(db, "users", uid);
       const userDocSnap = await getDoc(userDocRef);
@@ -49,35 +58,55 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
+    console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}`, "color: green; font-weight: bold;");
+    setLoading(true); // Indicate we are processing login
+    setUser(firebaseUser);
+    await fetchUserProfileCallback(firebaseUser.uid);
+    setLoading(false);
+    console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now false.`, "color: green; font-weight: bold;");
+  }, [fetchUserProfileCallback]);
 
   useEffect(() => {
     console.log(`%cAuthContext useEffect: Subscribing to onAuthStateChanged. Initial loading state: ${loading}`, "color: orange;");
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log(`%cAuthContext onAuthStateChanged: FIRED. currentUser: ${currentUser ? currentUser.uid : 'null'}`, "color: green; font-weight: bold;");
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log(`%cAuthContext onAuthStateChanged: FIRED. currentUser from Firebase: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: green; font-weight: bold;");
       
-      if (currentUser) {
-        setUser(currentUser); // Set user immediately
-        await fetchUserProfileCallback(currentUser.uid); // Fetch profile
-        console.log(`%cAuthContext onAuthStateChanged: User ${currentUser.uid} processed, profile fetch attempted.`, "color: green;");
+      if (firebaseUser) {
+        // If handleLoginSuccessCallback has already set the user, 
+        // this might be redundant but ensures consistency for external changes or initial load.
+        if (user?.uid !== firebaseUser.uid) { // Only if user is different or not yet set by handleLoginSuccess
+            setLoading(true); // Set loading true while we process
+            setUser(firebaseUser);
+            await fetchUserProfileCallback(firebaseUser.uid);
+            setLoading(false); // Done processing
+            console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed, profile fetch attempted. Loading set to false.`, "color: green;");
+        } else if (loading && user?.uid === firebaseUser.uid) {
+            // This handles the case where onAuthStateChanged fires for an already "logged in" user (e.g. page refresh)
+            // but handleLoginSuccessCallback wasn't called.
+            // We might still be in the initial loading phase.
+            console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} already set, ensuring profile is fetched if still loading.`, "color: green;");
+            await fetchUserProfileCallback(firebaseUser.uid); // Ensure profile is fetched
+            setLoading(false);
+            console.log(`%cAuthContext onAuthStateChanged: Profile fetch for existing user ${firebaseUser.uid} complete. Loading set to false.`, "color: green;");
+        }
       } else {
         setUser(null);
         setUserProfile(null);
-        console.log("%cAuthContext onAuthStateChanged: No currentUser. User and profile set to null.", "color: green;");
+        setLoading(false); 
+        console.log("%cAuthContext onAuthStateChanged: No currentUser. User and profile set to null. Loading set to false.", "color: red;");
       }
-      // This ensures loading is set to false only after the first auth state check is complete
-      // and any associated user data fetching (like profile) is attempted.
-      setLoading(false); 
-      console.log(`%cAuthContext onAuthStateChanged: Setting loading to false. Final user state: ${currentUser ? currentUser.uid : 'null'}`, "color: blue; font-weight: bold;");
     });
 
     return () => {
       console.log("%cAuthContext useEffect: Unsubscribing from onAuthStateChanged.", "color: orange;");
       unsubscribe();
     };
-  }, [fetchUserProfileCallback]); // fetchUserProfileCallback is memoized with useCallback
+  // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [fetchUserProfileCallback]); // user dependency removed to avoid loop with setUser in onAuthStateChanged if not careful
 
   return (
-    <AuthContext.Provider value={{ user, userProfile, loading, fetchUserProfile: fetchUserProfileCallback }}>
+    <AuthContext.Provider value={{ user, userProfile, loading, fetchUserProfile: fetchUserProfileCallback, handleLoginSuccess: handleLoginSuccessCallback }}>
       {children}
     </AuthContext.Provider>
   );
