@@ -6,7 +6,9 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut as firebaseSignOut,
-  sendEmailVerification
+  sendEmailVerification,
+  GoogleAuthProvider,
+  signInWithPopup
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import { z } from "zod";
@@ -47,10 +49,8 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    // Send email verification
     await sendEmailVerification(user);
 
-    // Store additional user info in Firestore
     await setDoc(doc(db, "users", user.uid), {
       uid: user.uid,
       email: user.email,
@@ -58,16 +58,12 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
       age,
       gender,
       createdAt: new Date().toISOString(),
+      authProvider: "email",
     });
     
     return { success: "Account created! Please check your email to verify your account.", userId: user.uid };
   } catch (error: any) {
-    if (error.code === 'auth/email-already-in-use') {
-      return { error: "This email is already in use." };
-    }
-    console.error("Sign up error:", error); // Server-side log for detailed object
-
-    // Provide a more informative error to the client
+    console.error("Sign up error object:", error);
     let clientErrorMessage = "Failed to create account. Please try again.";
     if (error.message) {
       clientErrorMessage = `Sign up failed: ${error.message}`;
@@ -90,18 +86,76 @@ export async function loginUser(values: z.infer<typeof LoginSchema>) {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     if (!userCredential.user.emailVerified) {
-      await firebaseSignOut(auth); // Sign out user if email is not verified
+      const userEmail = userCredential.user.email;
+      // Check if this user was created with Google provider. Google provider users might not have emailVerified set to true by Firebase in the same way.
+      const userDocRef = doc(db, "users", userCredential.user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists() && userDocSnap.data()?.authProvider === 'google') {
+        // If user signed up with Google, let them log in
+         return { success: "Logged in successfully!" };
+      }
+      await firebaseSignOut(auth); 
       return { error: "Please verify your email before logging in." };
     }
     return { success: "Logged in successfully!" };
   } catch (error: any) {
+    console.error("Login error object:", error);
     if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         return { error: "Invalid email or password." };
     }
-    console.error("Login error:", error);
     let clientErrorMessage = "Failed to login. Please try again.";
     if (error.message) {
       clientErrorMessage = `Login failed: ${error.message}`;
+      if (error.code) {
+        clientErrorMessage += ` (Code: ${error.code})`;
+      }
+    }
+    return { error: clientErrorMessage };
+  }
+}
+
+export async function signInWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  try {
+    const userCredential = await signInWithPopup(auth, provider);
+    const user = userCredential.user;
+
+    const userDocRef = doc(db, "users", user.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (!userDocSnap.exists()) {
+      // New user via Google
+      await setDoc(userDocRef, {
+        uid: user.uid,
+        email: user.email,
+        fullName: user.displayName || "Google User",
+        // age, gender, practiceTime will be undefined initially for Google users
+        // They can set it in their profile.
+        createdAt: new Date().toISOString(),
+        authProvider: "google",
+      });
+    } else {
+      // Existing user, update last login or other relevant info if necessary
+      await updateDoc(userDocRef, {
+        lastLoginAt: new Date().toISOString(),
+        // Optionally update fullName and email if they changed in Google profile
+        fullName: user.displayName || userDocSnap.data()?.fullName || "Google User",
+        email: user.email, 
+      });
+    }
+    return { success: "Logged in with Google successfully!" };
+  } catch (error: any) {
+    console.error("Google Sign-In error object:", error);
+    // Handle specific Google Sign-In errors
+    if (error.code === 'auth/popup-closed-by-user') {
+      return { error: "Sign-in popup closed. Please try again." };
+    }
+    if (error.code === 'auth/account-exists-with-different-credential') {
+        return { error: "An account already exists with this email address using a different sign-in method. Try logging in with that method."};
+    }
+    let clientErrorMessage = "Failed to sign in with Google. Please try again.";
+    if (error.message) {
+      clientErrorMessage = `Google Sign-In failed: ${error.message}`;
       if (error.code) {
         clientErrorMessage += ` (Code: ${error.code})`;
       }
@@ -145,9 +199,7 @@ export async function updateUserProfile(userId: string, values: z.infer<typeof P
   }
   
   const dataToUpdate = validatedFields.data;
-  // Remove undefined fields
   Object.keys(dataToUpdate).forEach(key => dataToUpdate[key as keyof typeof dataToUpdate] === undefined && delete dataToUpdate[key as keyof typeof dataToUpdate]);
-
 
   if (Object.keys(dataToUpdate).length === 0) {
     return { error: "No changes provided." };
@@ -180,19 +232,17 @@ export async function getUserProfile(userId: string) {
 
 // Mock actions for streaks and calendar data
 export async function getStudyStreakData(userId: string) {
-  // In a real app, fetch this from your database (e.g., MySQL)
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
+  await new Promise(resolve => setTimeout(resolve, 500)); 
   return {
     currentStreak: Math.floor(Math.random() * 30),
     longestStreak: Math.floor(Math.random() * 100) + 30,
     totalQuestionsAnswered: Math.floor(Math.random() * 1000),
-    completedDates: [new Date(), new Date(Date.now() - 86400000 * 2), new Date(Date.now() - 86400000 * 3)], // Example dates
+    completedDates: [new Date(), new Date(Date.now() - 86400000 * 2), new Date(Date.now() - 86400000 * 3)], 
   };
 }
 
 export async function getPracticeQuestions() {
-  // In a real app, fetch this from your MySQL database
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
+  await new Promise(resolve => setTimeout(resolve, 500)); 
   return [
     { id: 'q1', topic: 'History', question: 'Who was the first President of the United States?', options: ['Abraham Lincoln', 'George Washington', 'Thomas Jefferson', 'John Adams'], correctAnswer: 'George Washington' },
     { id: 'q2', topic: 'Science', question: 'What is the chemical symbol for water?', options: ['H2O', 'O2', 'CO2', 'NaCl'], correctAnswer: 'H2O' },
@@ -203,9 +253,9 @@ export async function getPracticeQuestions() {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnswered: number, topicsCovered: string[]) {
-  // In a real app, this would update MySQL and potentially Firestore for streaks
   console.log(`User ${userId} answered ${questionsAnswered} questions on topics: ${topicsCovered.join(', ')}`);
   await new Promise(resolve => setTimeout(resolve, 300));
   return { success: "Practice session recorded!" };
 }
 
+    
