@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig";
 
@@ -60,7 +60,7 @@ export function SignupForm() {
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
       fullName: "",
-      age: '', 
+      age: '',
       gender: "",
       email: "",
       password: "",
@@ -69,6 +69,7 @@ export function SignupForm() {
 
   function onSubmit(values: z.infer<typeof SignUpSchema>) {
     startTransition(async () => {
+      console.log("SignupForm: Submitting email/password sign-up");
       const result = await signUpUser(values);
       if (result.error) {
         toast({
@@ -76,25 +77,27 @@ export function SignupForm() {
           description: result.error,
           variant: "destructive",
         });
+        console.error("SignupForm: Sign-up failed", result.error);
       } else {
         toast({
           title: "Sign Up Successful",
           description: result.success,
         });
-        // For email/password signup, we still go to practice-time
-        if (typeof window !== "undefined") {
-           window.location.assign(`/practice-time?userId=${result.userId}`);
-        }
+        console.log("SignupForm: Sign-up successful, redirecting to /practice-time");
+        router.replace(`/practice-time?userId=${result.userId}`);
+        router.refresh();
       }
     });
   }
 
   const handleGoogleSignUp = () => {
     startGoogleTransition(async () => {
+      console.log("SignupForm: Attempting Google Sign-Up");
       const provider = new GoogleAuthProvider();
       try {
         const userCredential: UserCredential = await signInWithPopup(auth, provider);
         const user = userCredential.user;
+        console.log("SignupForm: Google Sign-Up with popup successful, user UID:", user.uid);
 
         const firestoreResult = await ensureGoogleUserInFirestore({
           uid: user.uid,
@@ -108,14 +111,15 @@ export function SignupForm() {
             description: `Could not save user data: ${firestoreResult.error}`,
             variant: "destructive",
           });
+          console.error("SignupForm: Google Sign-Up Firestore error", firestoreResult.error);
         } else {
           toast({
             title: "Google Sign-Up Successful",
             description: "Account created with Google!",
           });
-          if (typeof window !== "undefined") {
-            window.location.assign("/dashboard");
-          }
+          console.log("SignupForm: Google Sign-Up and Firestore update successful, redirecting to /dashboard");
+          router.replace("/dashboard");
+          router.refresh();
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-Up failed. Please try again.";
@@ -137,6 +141,7 @@ export function SignupForm() {
           description: errorMessage,
           variant: "destructive",
         });
+        console.error("SignupForm: Google Sign-Up failed", errorMessage);
       }
     });
   };
@@ -173,12 +178,12 @@ export function SignupForm() {
                 <FormItem>
                   <FormLabel>Age</FormLabel>
                   <FormControl>
-                    <Input 
-                      type="number" 
-                      placeholder="25" 
-                      {...field} 
+                    <Input
+                      type="number"
+                      placeholder="25"
+                      {...field}
                       onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                      value={field.value === undefined || field.value === null ? '' : field.value} 
+                      value={field.value === undefined || field.value === null ? '' : field.value}
                     />
                   </FormControl>
                   <FormMessage />

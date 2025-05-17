@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig";
 
@@ -55,6 +55,7 @@ export function LoginForm() {
 
   function onSubmit(values: z.infer<typeof LoginSchema>) {
     startTransition(async () => {
+      console.log("LoginForm: Submitting email/password login");
       const result = await loginUser(values);
       if (result.error) {
         toast({
@@ -62,24 +63,27 @@ export function LoginForm() {
           description: result.error,
           variant: "destructive",
         });
+        console.error("LoginForm: Login failed", result.error);
       } else {
         toast({
           title: "Login Successful",
           description: result.success,
         });
-        if (typeof window !== "undefined") {
-          window.location.assign("/dashboard");
-        }
+        console.log("LoginForm: Login successful, redirecting to /dashboard");
+        router.replace("/dashboard");
+        router.refresh();
       }
     });
   }
 
   const handleGoogleSignIn = () => {
     startGoogleTransition(async () => {
+      console.log("LoginForm: Attempting Google Sign-In");
       const provider = new GoogleAuthProvider();
       try {
         const userCredential: UserCredential = await signInWithPopup(auth, provider);
         const user = userCredential.user;
+        console.log("LoginForm: Google Sign-In with popup successful, user UID:", user.uid);
 
         const firestoreResult = await ensureGoogleUserInFirestore({
           uid: user.uid,
@@ -93,14 +97,15 @@ export function LoginForm() {
             description: `Could not save user data: ${firestoreResult.error}`,
             variant: "destructive",
           });
+          console.error("LoginForm: Google Sign-In Firestore error", firestoreResult.error);
         } else {
           toast({
             title: "Google Sign-In Successful",
             description: "Logged in with Google!",
           });
-          if (typeof window !== "undefined") {
-            window.location.assign("/dashboard");
-          }
+          console.log("LoginForm: Google Sign-In and Firestore update successful, redirecting to /dashboard");
+          router.replace("/dashboard");
+          router.refresh();
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
@@ -122,6 +127,7 @@ export function LoginForm() {
           description: errorMessage,
           variant: "destructive",
         });
+        console.error("LoginForm: Google Sign-In failed", errorMessage);
       }
     });
   };
@@ -200,4 +206,5 @@ export function LoginForm() {
     </Card>
   );
 }
+
     
