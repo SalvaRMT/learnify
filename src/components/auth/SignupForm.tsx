@@ -10,7 +10,6 @@ import { useTransition } from "react";
 import { signInWithPopup, GoogleAuthProvider, type UserCredential } from "firebase/auth";
 import { auth } from "@/lib/firebaseConfig";
 
-
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { signUpUser, ensureGoogleUserInFirestore } from "@/lib/actions"; // ensureGoogleUserInFirestore replaces signInWithGoogle
+import { signUpUser, ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
 
 const SignUpSchema = z.object({
@@ -84,9 +83,8 @@ export function SignupForm() {
           description: result.success,
         });
         console.log("SignupForm: Sign-up successful, redirecting to /practice-time");
-        // Redirect to practice time page after email/password signup
         router.replace(`/practice-time?userId=${result.userId}`);
-        router.refresh(); 
+        // router.refresh(); // Removed
       }
     });
   }
@@ -100,7 +98,6 @@ export function SignupForm() {
         const user = userCredential.user;
         console.log("SignupForm: Google Sign-Up with popup successful, user UID:", user.uid);
 
-        // Now call the server action to ensure user exists in Firestore
         const firestoreResult = await ensureGoogleUserInFirestore({
           uid: user.uid,
           email: user.email,
@@ -110,7 +107,7 @@ export function SignupForm() {
         if (firestoreResult.error) {
            toast({
             title: "Google Sign-Up Error",
-            description: `Could not save user data: ${firestoreResult.error}`, // More specific error
+            description: `Could not save user data: ${firestoreResult.error}`,
             variant: "destructive",
           });
           console.error("SignupForm: Google Sign-Up Firestore error", firestoreResult.error);
@@ -120,9 +117,8 @@ export function SignupForm() {
             description: "Account created with Google!",
           });
           console.log("SignupForm: Google Sign-Up and Firestore update successful, attempting to redirect to /dashboard");
-          // For Google Sign-Up, go directly to dashboard
           router.replace("/dashboard"); 
-          router.refresh();
+          // router.refresh(); // Removed
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-Up failed. Please try again.";
@@ -144,7 +140,7 @@ export function SignupForm() {
           description: errorMessage,
           variant: "destructive",
         });
-        console.error("SignupForm: Google Sign-Up failed", error); // Log the full error object
+        console.error("SignupForm: Google Sign-Up failed", error);
       }
     });
   };

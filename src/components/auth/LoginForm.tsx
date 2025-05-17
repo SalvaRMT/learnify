@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions"; // ensureGoogleUserInFirestore replaces signInWithGoogle
+import { loginUser, ensureGoogleUserInFirestore } from "@/lib/actions";
 import { Loader2 } from "lucide-react";
 
 const LoginSchema = z.object({
@@ -65,13 +65,13 @@ export function LoginForm() {
         });
         console.error("LoginForm: Login failed", result.error);
       } else {
+        console.log("LoginForm: Login successful, attempting to redirect to /dashboard");
+        router.replace("/dashboard");
+        // router.refresh(); // Removed to let onAuthStateChanged handle state propagation
         toast({
           title: "Login Successful",
           description: result.success,
         });
-        console.log("LoginForm: Login successful, attempting to redirect to /dashboard");
-        router.replace("/dashboard");
-        router.refresh(); // Crucial for App Router to re-evaluate server components and context
       }
     });
   }
@@ -85,7 +85,6 @@ export function LoginForm() {
         const user = userCredential.user;
         console.log("LoginForm: Google Sign-In with popup successful, user UID:", user.uid);
 
-        // Now call the server action to ensure user exists in Firestore
         const firestoreResult = await ensureGoogleUserInFirestore({
           uid: user.uid,
           email: user.email,
@@ -95,18 +94,18 @@ export function LoginForm() {
         if (firestoreResult.error) {
           toast({
             title: "Google Sign-In Error",
-            description: `Could not save user data: ${firestoreResult.error}`, // More specific error
+            description: `Could not save user data: ${firestoreResult.error}`,
             variant: "destructive",
           });
           console.error("LoginForm: Google Sign-In Firestore error", firestoreResult.error);
         } else {
+          console.log("LoginForm: Google Sign-In and Firestore update successful, attempting to redirect to /dashboard");
+          router.replace("/dashboard");
+          // router.refresh(); // Removed
           toast({
             title: "Google Sign-In Successful",
             description: "Logged in with Google!",
           });
-          console.log("LoginForm: Google Sign-In and Firestore update successful, attempting to redirect to /dashboard");
-          router.replace("/dashboard");
-          router.refresh();
         }
       } catch (error: any) {
         let errorMessage = "Google Sign-In failed. Please try again.";
@@ -128,7 +127,7 @@ export function LoginForm() {
           description: errorMessage,
           variant: "destructive",
         });
-        console.error("LoginForm: Google Sign-In failed", error); // Log the full error object
+        console.error("LoginForm: Google Sign-In failed", error);
       }
     });
   };
