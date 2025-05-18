@@ -97,8 +97,7 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
     const userDocRef = doc(db, "users", userId);
     await updateDoc(userDocRef, dataToUpdate);
     return { success: "¡Perfil actualizado correctamente!" };
-  } catch (error: any)
- {
+  } catch (error: any) {
     console.error("Error al actualizar el perfil (actions.ts):", error);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
@@ -123,6 +122,32 @@ export async function signOutUser(): Promise<{ success?: string; error?: string 
 }
 
 export async function getUserProfile(userId: string): Promise<{ success: boolean, data?: UserProfile, error?: string }> {
+  // =========================================================================================
+  // MUY IMPORTANTE: ¡ERROR DE PERMISOS DE LECTURA!
+  //
+  // Si ves un error en la consola del navegador que dice algo como:
+  // "ERROR DE PERMISOS DE FIRESTORE: No se pudo LEER el perfil para el usuario [UID].
+  //  Revisa tus REGLAS DE SEGURIDAD de Firestore. La regla necesaria es
+  //  'allow read: if request.auth.uid == userId;' en la ruta '/users/{userId}'."
+  //
+  // Esto significa que TUS REGLAS DE SEGURIDAD DE FIRESTORE están incorrectas.
+  // DEBES ir a tu Consola de Firebase -> Firestore Database -> Rules (Reglas)
+  // y asegurarte de que la regla para la colección 'users' permite la lectura:
+  //
+  // rules_version = '2';
+  // service cloud.firestore {
+  //   match /databases/{database}/documents {
+  //     match /users/{userId} { // "{userId}" es un comodín
+  //       allow read: if request.auth.uid == userId;  // <-- ¡ESTA LÍNEA ES CRUCIAL! userId se refiere al comodín de la ruta.
+  //       // ... tus otras reglas como update, delete, create ...
+  //     }
+  //     // ... otras colecciones ...
+  //   }
+  // }
+  //
+  // El código de la aplicación NO PUEDE solucionar este problema. La corrección
+  // DEBE hacerse en tus REGLAS DE SEGURIDAD DE FIRESTORE en la Consola de Firebase.
+  // =========================================================================================
   try {
     const userDocRef = doc(db, "users", userId);
     // CRUCIAL: Las reglas de seguridad de Firestore deben permitir 'read' en este documento
@@ -256,8 +281,6 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
         const summarySnap = await getDoc(streakSummaryRef);
         if (summarySnap.exists()) {
             const currentTotal = summarySnap.data().totalQuestionsAnswered || 0;
-            // No hay cambio real en totalQuestionsAnswered si questionsAnsweredCorrectly es 0
-            // await updateDoc(streakSummaryRef, { totalQuestionsAnswered: currentTotal }); 
         }
     } catch (e:any) {
         console.warn(`[recordPracticeSession] No se pudo acceder al resumen de racha para actualizar totalQuestions (puede que aún no exista o por permisos): ${e.message}`);
@@ -281,8 +304,8 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       currentStreak = 0, 
       longestStreak = 0, 
       totalQuestionsAnswered: summaryTotalQuestions = 0, 
-      lastPracticeDate, // Firestore Timestamp or undefined
-      completedDates = [] // Array of Firestore Timestamps or JS Dates if read before
+      lastPracticeDate, 
+      completedDates = [] 
     } = summarySnap.exists() ? summarySnap.data() : {};
     
     console.log("[recordPracticeSession] Resumen de racha inicial de Firestore:", { currentStreak, longestStreak, summaryTotalQuestions, lastPracticeDate: lastPracticeDate?.toDate?.().toISOString(), completedDates: completedDates.map((d: any) => d instanceof Timestamp ? d.toDate().toISOString() : new Date(d).toISOString()) });
@@ -377,4 +400,3 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     return { error: `Error al registrar la sesión: ${error.message}` };
   }
 }
-
