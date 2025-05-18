@@ -4,7 +4,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { useEffect, useTransition, useState } from "react";
+import { useEffect, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -46,12 +46,11 @@ const practiceTimeOptions = [
 ];
 
 export function ProfileForm() {
-  const { user, userProfile, fetchUserAppData, loading: authLoading } = useAuth();
+  const { user, userProfile, fetchUserAppData, loading: authLoading, handleLoginSuccess: internalHandleLoginSuccess } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [isUpdating, startUpdateTransition] = useTransition();
   const [isSigningOut, startSignOutTransition] = useTransition();
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true); // Local loading state for profile data
 
   const form = useForm<z.infer<typeof ProfileUpdateSchema>>({
     resolver: zodResolver(ProfileUpdateSchema),
@@ -63,73 +62,60 @@ export function ProfileForm() {
     },
   });
 
-  // Effect to reset form when userProfile data is available or changes
   useEffect(() => {
-    console.log("ProfileForm useEffect [userProfile, authLoading]: authLoading:", authLoading, "userProfile exists:", !!userProfile);
-    if (!authLoading && userProfile) {
-      form.reset({
-        fullName: userProfile.fullName || "",
-        age: userProfile.age === undefined || userProfile.age === null ? '' : Number(userProfile.age),
-        gender: userProfile.gender || "",
-        practiceTime: userProfile.practiceTime || 15,
-      });
-      setIsLoadingProfile(false); // Profile is loaded
-      console.log("ProfileForm: Profile data loaded into form:", userProfile);
-    } else if (!authLoading && user && !userProfile) {
-      // User is loaded, auth is done, but no profile yet. Keep showing loading.
-      setIsLoadingProfile(true);
-      console.log("ProfileForm: User loaded, no profile yet. Kept isLoadingProfile true.");
-    } else if (authLoading && user) {
-      // Auth is loading, user might be available from a previous session, wait for auth to finish
-      setIsLoadingProfile(true);
-      console.log("ProfileForm: Auth is loading, waiting for profile...");
+    console.log(`%cProfileForm useEffect [user, userProfile, authLoading]: User: ${!!user}, UserProfile: ${!!userProfile}, AuthLoading: ${authLoading}`, "color: dodgerblue;");
+    if (!authLoading && user) {
+      if (userProfile) {
+        console.log("%cProfileForm: Auth not loading, user and profile exist. Resetting form with profile data.", "color: green;");
+        form.reset({
+          fullName: userProfile.fullName || "",
+          age: userProfile.age === undefined || userProfile.age === null ? '' : Number(userProfile.age),
+          gender: userProfile.gender || "",
+          practiceTime: userProfile.practiceTime || 15,
+        });
+      } else {
+        console.log("%cProfileForm: Auth not loading, user exists, but NO profile. Resetting form to defaults.", "color: orange;");
+        // No profile found, reset to defaults but user is loaded.
+        // This indicates profile couldn't be fetched (e.g. permissions error) or doesn't exist.
+        form.reset({
+          fullName: "",
+          age: '',
+          gender: "",
+          practiceTime: 15,
+        });
+      }
     } else if (!authLoading && !user) {
-      // No user, auth is done, so no profile to load
-      setIsLoadingProfile(false);
-      console.log("ProfileForm: No user and auth not loading. No profile to load.");
+        console.log("%cProfileForm: Auth not loading and no user. Resetting form to defaults (user logged out).", "color: red;");
+        form.reset({ // Reset form if user logs out
+            fullName: "",
+            age: '',
+            gender: "",
+            practiceTime: 15,
+        });
     }
-  }, [userProfile, authLoading, form, user]);
-
-
-  // Effect to fetch user profile if it's missing after initial auth check
-  useEffect(() => {
-    console.log("ProfileForm useEffect [user, authLoading, userProfile, fetchUserAppData]: user:",!!user, "authLoading:", authLoading, "userProfile exists:", !!userProfile)
-    if (user && !authLoading && !userProfile && !isLoadingProfile) { // only fetch if not already loading profile locally
-      console.log("ProfileForm: User exists, auth not loading, profile missing. Attempting to fetch profile.");
-      setIsLoadingProfile(true);
-      fetchUserAppData(user.uid).finally(() => {
-        // AuthContext will update userProfile, triggering the other useEffect to reset the form.
-        // We only set local loading to false here if the fetch is done.
-        // The actual population of the form happens when userProfile changes.
-        setIsLoadingProfile(false); 
-        console.log("ProfileForm: fetchUserAppData attempt finished in useEffect. Local isLoadingProfile set to false.");
-      });
-    }
-  }, [user, authLoading, userProfile, fetchUserAppData, isLoadingProfile]);
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, userProfile, authLoading, form.reset]); // form.reset added to dep array if it's stable
 
   function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
     
     const finalValues: { [key: string]: any } = {};
-    // Only include fields that have actually changed from the current profile
-    // or are being set for the first time.
     if (values.fullName !== undefined && values.fullName !== (userProfile?.fullName || "")) {
       finalValues.fullName = values.fullName;
     }
     
-    const ageFromForm = values.age === '' || values.age === undefined ? null : Number(values.age);
-    const ageFromProfile = userProfile?.age === '' || userProfile?.age === undefined || userProfile?.age === null ? null : Number(userProfile.age);
+    const ageFromForm = values.age === '' || values.age === undefined ? undefined : Number(values.age); // Treat empty string as undefined for comparison
+    const ageFromProfile = userProfile?.age === '' || userProfile?.age === undefined || userProfile?.age === null ? undefined : Number(userProfile.age);
 
     if (ageFromForm !== ageFromProfile) {
-       finalValues.age = ageFromForm; 
+       finalValues.age = ageFromForm === undefined ? null : ageFromForm; // Send null if undefined to clear field
     }
 
-    const genderFromForm = values.gender === "" || values.gender === undefined ? null : values.gender;
-    const genderFromProfile = userProfile?.gender === "" || userProfile?.gender === undefined || userProfile?.gender === null ? null : userProfile.gender;
+    const genderFromForm = values.gender === "" || values.gender === undefined ? undefined : values.gender;
+    const genderFromProfile = userProfile?.gender === "" || userProfile?.gender === undefined || userProfile?.gender === null ? undefined : userProfile.gender;
 
     if (genderFromForm !== genderFromProfile) {
-      finalValues.gender = genderFromForm;
+      finalValues.gender = genderFromForm === undefined ? null : genderFromForm; // Send null if undefined
     }
 
     if (values.practiceTime !== undefined && values.practiceTime !== (userProfile?.practiceTime || 15)) {
@@ -147,14 +133,14 @@ export function ProfileForm() {
       if (result.error) {
         toast({ 
             title: "Fallo al Actualizar", 
-            description: result.error, // This will now show the more specific error from actions.ts
+            description: result.error,
             variant: "destructive",
             duration: 9000, 
         });
       } else {
         toast({ title: "Perfil Actualizado", description: result.success });
-        if(user.uid) { // Ensure user.uid is still valid
-            await fetchUserAppData(user.uid); // Refresh profile data in context
+        if(user.uid && fetchUserAppData) { 
+            await fetchUserAppData(user.uid); 
         }
       }
     });
@@ -167,13 +153,12 @@ export function ProfileForm() {
         toast({ title: "Fallo al Cerrar Sesión", description: result.error, variant: "destructive" });
       } else {
         toast({ title: "Sesión Cerrada", description: "Has cerrado sesión correctamente." });
-        router.push("/login"); // Redirect to login after sign out
+        router.push("/login"); 
       }
     });
   };
   
-  // Main loading state: either AuthContext is loading, or we are locally loading profile
-  if (authLoading || (isLoadingProfile && user && !userProfile)) {
+  if (authLoading && user) { // Show spinner if auth is loading AND we have a user (meaning, trying to fetch their data)
       return (
           <div className="flex justify-center items-center py-10">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -182,19 +167,32 @@ export function ProfileForm() {
       );
   }
 
-  if (!user) {
-    // This case should ideally be handled by AppLayout redirecting to /login
-    // But as a fallback:
+  if (!user && !authLoading) { // If not loading and no user, prompt to login (AppLayout should handle this, but as a fallback)
     return <p className="text-center text-muted-foreground">Por favor, inicia sesión para ver tu perfil.</p>;
   }
+  
+  // If authLoading is false, and user exists, but userProfile is null, it means profile fetch failed or profile doesn't exist.
+  // The form will be rendered empty or with defaults due to the useEffect reset.
+  // We can add a specific message here if needed.
+  if (!authLoading && user && !userProfile) {
+    console.log("%cProfileForm: Rendering form. Auth loaded, user exists, but no profile data from context.", "color: orange;");
+    // The form will be shown with default/empty values.
+    // A message can be added here to inform the user that their profile data couldn't be loaded or is new.
+  }
+
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-3xl font-bold text-primary">Tu Perfil</CardTitle>
         <CardDescription>
-          Gestiona la configuración y preferencias de tu cuenta. Tu correo: {user.email} {user.emailVerified ? "(Verificado)" : "(No Verificado)"}
+          Gestiona la configuración y preferencias de tu cuenta. Tu correo: {user?.email} {user?.emailVerified ? "(Verificado)" : "(No Verificado)"}
         </CardDescription>
+         {!authLoading && user && !userProfile && (
+          <p className="text-sm text-destructive mt-2 p-2 bg-destructive/10 border border-destructive/30 rounded-md">
+            No se pudo cargar tu perfil desde la base de datos o aún no has guardado uno. Es posible que necesites verificar los permisos de Firestore (allow read en /users/&#123;userId&#125;).
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -271,7 +269,7 @@ export function ProfileForm() {
               )}
             />
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
-              <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading || isLoadingProfile}>
+              <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading}>
                 {(isUpdating) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Guardar Cambios
               </Button>
@@ -280,7 +278,7 @@ export function ProfileForm() {
                 Cerrar Sesión
               </Button>
             </div>
-             {!user.emailVerified && (
+             {user && !user.emailVerified && ( // Check if user exists before accessing emailVerified
                 <p className="text-sm text-yellow-600 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                     Tu correo electrónico no está verificado. Por favor, revisa tu bandeja de entrada por un enlace de verificación. Algunas funcionalidades podrían estar limitadas.
                 </p>
