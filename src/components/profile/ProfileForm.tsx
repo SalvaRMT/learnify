@@ -4,7 +4,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { useEffect, useTransition } from "react";
+import { useEffect, useTransition, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +32,7 @@ import { useRouter } from "next/navigation";
 
 const ProfileUpdateSchema = z.object({
   fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres.").optional(),
-  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')),
+  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? undefined : val),
   gender: z.string().min(1, "Por favor selecciona un género.").optional(),
   practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos.").optional(),
 });
@@ -51,8 +51,7 @@ export function ProfileForm() {
   const { toast } = useToast();
   const [isUpdating, startUpdateTransition] = useTransition();
   const [isSigningOut, startSignOutTransition] = useTransition();
-  const [isLoadingProfile, startLoadingProfileTransition] = useTransition();
-
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true); // Manage local loading state for profile
 
   const form = useForm<z.infer<typeof ProfileUpdateSchema>>({
     resolver: zodResolver(ProfileUpdateSchema),
@@ -65,6 +64,7 @@ export function ProfileForm() {
   });
 
   useEffect(() => {
+    console.log("ProfileForm useEffect: authLoading, user, userProfile", authLoading, !!user, !!userProfile);
     if (userProfile) {
       form.reset({
         fullName: userProfile.fullName || "",
@@ -72,10 +72,25 @@ export function ProfileForm() {
         gender: userProfile.gender || "",
         practiceTime: userProfile.practiceTime || 15,
       });
-    } else if (user && !authLoading) { 
-        startLoadingProfileTransition(async () => {
-            await fetchUserProfile(user.uid);
-        });
+      setIsLoadingProfile(false);
+      console.log("ProfileForm: Profile data loaded and form reset.", userProfile);
+    } else if (user && !authLoading && !userProfile) {
+      // If user exists, auth is not loading, but profile is still null, try fetching
+      console.log("ProfileForm: User exists, auth not loading, but no profile. Fetching profile...");
+      setIsLoadingProfile(true);
+      fetchUserProfile(user.uid).finally(() => {
+        // UserProfile should be updated by AuthContext's onAuthStateChanged or fetchUserProfile itself
+        // The next render cycle with updated userProfile will reset the form.
+        // We just set loading to false here if fetchUserProfile didn't lead to profile.
+        // This state is primarily for the initial load of the form itself.
+        console.log("ProfileForm: fetchUserProfile attempt finished in useEffect.");
+        // The AuthContext's userProfile state will trigger another re-render if successful
+        // For now, if it's still null after fetch, stop local loading
+        if (!userProfile) setIsLoadingProfile(false); 
+      });
+    } else if (!user && !authLoading) {
+        // No user and auth is done loading, so no profile to load
+        setIsLoadingProfile(false);
     }
   }, [userProfile, user, authLoading, form, fetchUserProfile]);
 
@@ -83,20 +98,21 @@ export function ProfileForm() {
   function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
     
-    const finalValues: Partial<z.infer<typeof ProfileUpdateSchema>> = {};
-    if (values.fullName && values.fullName !== userProfile?.fullName) {
+    const finalValues: { [key: string]: any } = {};
+    if (values.fullName !== undefined && values.fullName !== (userProfile?.fullName || "")) {
       finalValues.fullName = values.fullName;
     }
-    if (values.age !== undefined && values.age !== '' && Number(values.age) !== userProfile?.age) {
-      finalValues.age = Number(values.age);
-    } else if (values.age === '' && userProfile?.age !== undefined) {
-      finalValues.age = undefined; // Para permitir borrar la edad
+    if (values.age !== undefined) { // This handles both number and the potential 'undefined' from transform
+      if (values.age === undefined && userProfile?.age !== undefined) { // User wants to clear age
+        finalValues.age = undefined; // Explicitly set to undefined for Firestore to remove field or handle as null
+      } else if (values.age !== undefined && Number(values.age) !== userProfile?.age) {
+        finalValues.age = Number(values.age);
+      }
     }
-
-    if (values.gender && values.gender !== userProfile?.gender) {
+    if (values.gender !== undefined && values.gender !== (userProfile?.gender || "")) {
       finalValues.gender = values.gender;
     }
-     if (values.practiceTime && values.practiceTime !== userProfile?.practiceTime) {
+    if (values.practiceTime !== undefined && values.practiceTime !== (userProfile?.practiceTime || 15)) {
       finalValues.practiceTime = values.practiceTime;
     }
 
@@ -106,15 +122,18 @@ export function ProfileForm() {
     }
 
     startUpdateTransition(async () => {
+      console.log("ProfileForm onSubmit: Updating profile with values:", finalValues);
       const result = await updateUserProfile(user.uid, finalValues);
       if (result.error) {
-        let description = result.error;
-        if (result.error.includes("permission-denied") || result.error.includes("permisos de Firestore")) {
-            description = "Error al actualizar el perfil debido a permisos de Firestore. Por favor, revisa tus reglas de seguridad en la consola de Firebase para permitir que los usuarios actualicen sus propios perfiles (ej: allow update: if request.auth.uid == userId;).";
-        }
-        toast({ title: "Fallo al Actualizar", description, variant: "destructive" });
+        toast({ 
+            title: "Fallo al Actualizar", 
+            description: result.error, // Use the detailed error from actions.ts
+            variant: "destructive",
+            duration: 9000, // Show longer for detailed error
+        });
       } else {
         toast({ title: "Perfil Actualizado", description: result.success });
+        // Re-fetch profile after successful update to reflect changes
         await fetchUserProfile(user.uid); 
       }
     });
@@ -128,7 +147,6 @@ export function ProfileForm() {
       } else {
         toast({ title: "Sesión Cerrada", description: result.success });
         router.push("/login");
-        router.refresh(); 
       }
     });
   };
@@ -137,6 +155,7 @@ export function ProfileForm() {
       return (
           <div className="flex justify-center items-center py-10">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="ml-3">Cargando perfil...</p>
           </div>
       );
   }
@@ -229,7 +248,7 @@ export function ProfileForm() {
             />
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
               <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading || isLoadingProfile}>
-                {(isUpdating || isLoadingProfile) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {(isUpdating) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Guardar Cambios
               </Button>
               <Button variant="outline" onClick={handleSignOut} className="w-full sm:w-auto" disabled={isSigningOut || authLoading}>
