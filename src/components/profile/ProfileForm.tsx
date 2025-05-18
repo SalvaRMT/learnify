@@ -25,24 +25,24 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { updateUserProfile, signOutUser, getUserProfile } from "@/lib/actions";
+import { updateUserProfile, signOutUser } from "@/lib/actions";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 const ProfileUpdateSchema = z.object({
-  fullName: z.string().min(2, "Full name must be at least 2 characters.").optional(),
-  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120.").optional(),
-  gender: z.string().min(1, "Please select a gender.").optional(),
-  practiceTime: z.coerce.number().min(5, "Practice time must be at least 5 minutes.").optional(),
+  fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres.").optional(),
+  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')),
+  gender: z.string().min(1, "Por favor selecciona un género.").optional(),
+  practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos.").optional(),
 });
 
 const practiceTimeOptions = [
-  { label: "5 minutes", value: 5 },
-  { label: "10 minutes", value: 10 },
-  { label: "15 minutes", value: 15 },
-  { label: "30 minutes", value: 30 },
-  { label: "60 minutes", value: 60 },
+  { label: "5 minutos", value: 5 },
+  { label: "10 minutos", value: 10 },
+  { label: "15 minutos", value: 15 },
+  { label: "30 minutos", value: 30 },
+  { label: "60 minutos", value: 60 },
 ];
 
 export function ProfileForm() {
@@ -58,7 +58,7 @@ export function ProfileForm() {
     resolver: zodResolver(ProfileUpdateSchema),
     defaultValues: {
       fullName: "",
-      age: '', // Changed from undefined
+      age: '',
       gender: "",
       practiceTime: 15,
     },
@@ -68,7 +68,7 @@ export function ProfileForm() {
     if (userProfile) {
       form.reset({
         fullName: userProfile.fullName || "",
-        age: userProfile.age === undefined || userProfile.age === null ? '' : userProfile.age, // Ensure '' if no age
+        age: userProfile.age === undefined || userProfile.age === null ? '' : userProfile.age,
         gender: userProfile.gender || "",
         practiceTime: userProfile.practiceTime || 15,
       });
@@ -82,45 +82,39 @@ export function ProfileForm() {
 
   function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
-
-    // Filter out empty strings for optional fields before sending for update
-    // Zod's coerce will turn empty string for age to NaN, which might not be what we want to send for "no change"
-    const dataToUpdate: Partial<z.infer<typeof ProfileUpdateSchema>> = {};
-    if (values.fullName) dataToUpdate.fullName = values.fullName;
-    if (values.age !== undefined && values.age !== null && String(values.age).trim() !== '') {
-         dataToUpdate.age = Number(values.age);
-    } else if (form.formState.dirtyFields.age && values.age === undefined) { // If explicitly cleared and was optional
-        dataToUpdate.age = undefined; // Or however you signify removal for optional field
-    }
-
-
-    if (values.gender) dataToUpdate.gender = values.gender;
-    if (values.practiceTime) dataToUpdate.practiceTime = values.practiceTime;
     
-    // Ensure age is truly optional if not provided or cleared.
-    // If age in form is '', coerce.number might make it NaN.
-    // We only want to update if there's a valid number or it's explicitly being set/cleared based on schema.
-    const finalValues: any = { ...values };
-    if (finalValues.age === '' || finalValues.age === null || Number.isNaN(finalValues.age)) {
-      // If the field is optional and empty/NaN, don't send it unless it was initially set
-      // This logic can be tricky depending on desired behavior for "clearing" an optional number
-      if (userProfile?.age !== undefined && (finalValues.age === '' || finalValues.age === null)) {
-        // If user had an age and cleared it, send undefined to remove it (if backend supports)
-        // For now, we only send it if it's a valid number or part of the schema
-        finalValues.age = undefined; 
-      } else if (Number.isNaN(finalValues.age)) {
-        finalValues.age = undefined;
-      }
+    const finalValues: Partial<z.infer<typeof ProfileUpdateSchema>> = {};
+    if (values.fullName && values.fullName !== userProfile?.fullName) {
+      finalValues.fullName = values.fullName;
+    }
+    if (values.age !== undefined && values.age !== '' && Number(values.age) !== userProfile?.age) {
+      finalValues.age = Number(values.age);
+    } else if (values.age === '' && userProfile?.age !== undefined) {
+      finalValues.age = undefined; // Para permitir borrar la edad
     }
 
+    if (values.gender && values.gender !== userProfile?.gender) {
+      finalValues.gender = values.gender;
+    }
+     if (values.practiceTime && values.practiceTime !== userProfile?.practiceTime) {
+      finalValues.practiceTime = values.practiceTime;
+    }
+
+    if (Object.keys(finalValues).length === 0) {
+      toast({ title: "Sin Cambios", description: "No se detectaron cambios para actualizar." });
+      return;
+    }
 
     startUpdateTransition(async () => {
-      // Use finalValues which has age potentially set to undefined if it was empty string
       const result = await updateUserProfile(user.uid, finalValues);
       if (result.error) {
-        toast({ title: "Update Failed", description: result.error, variant: "destructive" });
+        let description = result.error;
+        if (result.error.includes("permission-denied") || result.error.includes("permisos de Firestore")) {
+            description = "Error al actualizar el perfil debido a permisos de Firestore. Por favor, revisa tus reglas de seguridad en la consola de Firebase para permitir que los usuarios actualicen sus propios perfiles (ej: allow update: if request.auth.uid == userId;).";
+        }
+        toast({ title: "Fallo al Actualizar", description, variant: "destructive" });
       } else {
-        toast({ title: "Profile Updated", description: result.success });
+        toast({ title: "Perfil Actualizado", description: result.success });
         await fetchUserProfile(user.uid); 
       }
     });
@@ -130,9 +124,9 @@ export function ProfileForm() {
     startSignOutTransition(async () => {
       const result = await signOutUser();
       if (result.error) {
-        toast({ title: "Sign Out Failed", description: result.error, variant: "destructive" });
+        toast({ title: "Fallo al Cerrar Sesión", description: result.error, variant: "destructive" });
       } else {
-        toast({ title: "Signed Out", description: result.success });
+        toast({ title: "Sesión Cerrada", description: result.success });
         router.push("/login");
         router.refresh(); 
       }
@@ -148,15 +142,15 @@ export function ProfileForm() {
   }
 
   if (!user) {
-    return <p className="text-center text-muted-foreground">Please log in to view your profile.</p>;
+    return <p className="text-center text-muted-foreground">Por favor, inicia sesión para ver tu perfil.</p>;
   }
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
-        <CardTitle className="text-3xl font-bold text-primary">Your Profile</CardTitle>
+        <CardTitle className="text-3xl font-bold text-primary">Tu Perfil</CardTitle>
         <CardDescription>
-          Manage your account settings and preferences. Your email: {user.email} {user.emailVerified ? "(Verified)" : "(Not Verified)"}
+          Gestiona la configuración y preferencias de tu cuenta. Tu correo: {user.email} {user.emailVerified ? "(Verificado)" : "(No Verificado)"}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -167,8 +161,8 @@ export function ProfileForm() {
               name="fullName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
-                  <FormControl><Input placeholder="Your full name" {...field} value={field.value || ""} /></FormControl>
+                  <FormLabel>Nombre Completo</FormLabel>
+                  <FormControl><Input placeholder="Tu nombre completo" {...field} value={field.value || ""} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )}
@@ -179,14 +173,14 @@ export function ProfileForm() {
                 name="age"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Age</FormLabel>
+                    <FormLabel>Edad</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
-                        placeholder="Your age" 
+                        placeholder="Tu edad" 
                         {...field} 
-                        onChange={e => field.onChange(e.target.value)} // Pass string value
-                        value={field.value === undefined || field.value === null ? '' : field.value} // Ensure value is not undefined/null
+                        onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                        value={field.value === undefined || field.value === null ? '' : field.value}
                       />
                     </FormControl>
                     <FormMessage />
@@ -198,14 +192,14 @@ export function ProfileForm() {
                 name="gender"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Gender</FormLabel>
+                    <FormLabel>Género</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger></FormControl>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Selecciona tu género" /></SelectTrigger></FormControl>
                       <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                        <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                        <SelectItem value="male">Masculino</SelectItem>
+                        <SelectItem value="female">Femenino</SelectItem>
+                        <SelectItem value="other">Otro</SelectItem>
+                        <SelectItem value="prefer_not_to_say">Prefiero no decirlo</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -218,9 +212,9 @@ export function ProfileForm() {
               name="practiceTime"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Daily Practice Time Goal</FormLabel>
+                  <FormLabel>Meta de Tiempo de Práctica Diario</FormLabel>
                   <Select onValueChange={(value) => field.onChange(parseInt(value))} value={String(field.value || 15)}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Select daily practice time" /></SelectTrigger></FormControl>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecciona tiempo de práctica diario" /></SelectTrigger></FormControl>
                     <SelectContent>
                       {practiceTimeOptions.map(option => (
                         <SelectItem key={option.value} value={String(option.value)}>
@@ -236,16 +230,16 @@ export function ProfileForm() {
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
               <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading || isLoadingProfile}>
                 {(isUpdating || isLoadingProfile) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
+                Guardar Cambios
               </Button>
               <Button variant="outline" onClick={handleSignOut} className="w-full sm:w-auto" disabled={isSigningOut || authLoading}>
                 {isSigningOut && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Sign Out
+                Cerrar Sesión
               </Button>
             </div>
              {!user.emailVerified && (
                 <p className="text-sm text-yellow-600 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                    Your email is not verified. Please check your inbox for a verification link. Some features might be limited.
+                    Tu correo electrónico no está verificado. Por favor, revisa tu bandeja de entrada por un enlace de verificación. Algunas funcionalidades podrían estar limitadas.
                 </p>
             )}
           </form>

@@ -4,12 +4,12 @@
 import { auth, db } from "@/lib/firebaseConfig";
 import { 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
+  // signInWithEmailAndPassword, // No longer used directly here for login
   signOut as firebaseSignOut,
-  sendEmailVerification,
-  type UserCredential,
+  // sendEmailVerification, // Not currently used
+  // type UserCredential, // Not currently used
 } from "firebase/auth";
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, writeBatch, Timestamp, limit, collectionGroup } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit, collectionGroup } from "firebase/firestore";
 import { z } from "zod";
 
 // Tipos para las preguntas, similar al que podrías tener en el frontend
@@ -29,10 +29,11 @@ const SignUpSchema = z.object({
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres."),
 });
 
-const LoginSchema = z.object({
-  email: z.string().email("Dirección de correo electrónico inválida."),
-  password: z.string().min(1, "La contraseña es obligatoria."),
-});
+// LoginSchema no es usado por server actions ahora, el login es client-side.
+// const LoginSchema = z.object({
+//   email: z.string().email("Dirección de correo electrónico inválida."),
+//   password: z.string().min(1, "La contraseña es obligatoria."),
+// });
 
 const PracticeTimeSchema = z.object({
   practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos."),
@@ -40,7 +41,7 @@ const PracticeTimeSchema = z.object({
 
 const ProfileUpdateSchema = z.object({
   fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres.").optional(),
-  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").transform(val => val === '' ? undefined : val).optional(),
+  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? undefined : val),
   gender: z.string().min(1, "Por favor selecciona un género.").optional(),
   practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos.").optional(),
 });
@@ -67,6 +68,8 @@ export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
       gender: gender || undefined,
       createdAt: serverTimestamp(),
       authProvider: "email",
+      lastLoginAt: serverTimestamp(),
+      practiceTime: 15, // Default practice time
     });
     
     return { success: "¡Cuenta creada! Ahora puedes establecer tu tiempo de práctica o iniciar sesión.", userId: user.uid };
@@ -132,12 +135,13 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
   }
   
   const dataToUpdate: { [key: string]: any } = {};
-  for (const key in validatedFields.data) {
-      const typedKey = key as keyof typeof validatedFields.data;
-      if (validatedFields.data[typedKey] !== undefined) {
-          dataToUpdate[typedKey] = validatedFields.data[typedKey];
-      }
-  }
+  const parsedData = validatedFields.data;
+
+  if (parsedData.fullName !== undefined) dataToUpdate.fullName = parsedData.fullName;
+  if (parsedData.age !== undefined) dataToUpdate.age = parsedData.age; // Zod transform handles '' to undefined
+  if (parsedData.gender !== undefined) dataToUpdate.gender = parsedData.gender;
+  if (parsedData.practiceTime !== undefined) dataToUpdate.practiceTime = parsedData.practiceTime;
+
 
   if (Object.keys(dataToUpdate).length === 0) {
     return { success: "No hay cambios para actualizar." };
@@ -153,7 +157,7 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
      if (error.code === 'permission-denied') {
-      return { error: "Error al actualizar el perfil debido a permisos de Firestore." };
+      return { error: "Error al actualizar el perfil debido a permisos de Firestore. Revisa tus reglas de seguridad." };
     }
     return { error: `Error al actualizar el perfil: ${error.message}` };
   }
@@ -166,6 +170,9 @@ export async function getUserProfile(userId: string) {
     if (docSnap.exists()) {
       return { success: true, data: docSnap.data() };
     } else {
+      // Esto puede ocurrir si un usuario se autentica (ej. con Google) pero su doc no se crea.
+      // O si el UID es incorrecto.
+      console.warn(`Perfil de usuario no encontrado en Firestore para UID: ${userId}`);
       return { error: "Perfil de usuario no encontrado." };
     }
   } catch (error: any) {
@@ -190,6 +197,7 @@ export async function getStudyStreakData(userId: string) {
         if (ts instanceof Timestamp) {
           return ts.toDate();
         }
+        // Asumiendo que si no es Timestamp, es un string ISO o similar que Date puede parsear
         return new Date(ts); 
       });
       return {
@@ -213,6 +221,7 @@ export async function getStudyStreakData(userId: string) {
 export async function getPracticeQuestions(): Promise<Question[]> {
   try {
     const questionsColRef = collection(db, 'questions');
+    // Podrías añadir un query(questionsColRef, limit(20)) si tienes muchas preguntas
     const querySnapshot = await getDocs(questionsColRef);
     
     const allQuestions: Question[] = [];
@@ -221,7 +230,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
     });
 
     if (allQuestions.length === 0) {
-      console.log("No se encontraron preguntas en Firestore. Devolviendo un array vacío.");
+      console.warn("No se encontraron preguntas en la colección 'questions' de Firestore. Devolviendo un array vacío.");
       return [];
     }
 
@@ -231,7 +240,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
     // Seleccionar hasta 5 preguntas
     const selectedQuestions = shuffledQuestions.slice(0, 5);
     
-    console.log(`Se seleccionaron ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles.`);
+    console.log(`Se seleccionaron ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore.`);
     return selectedQuestions;
 
   } catch (error: any) {
@@ -241,17 +250,10 @@ export async function getPracticeQuestions(): Promise<Question[]> {
     } else if (error.code === 'permission-denied') {
       console.error("Error de permisos al leer la colección 'questions'. Asegúrate de que las reglas de seguridad de Firestore lo permitan.");
     }
-    // Devolver preguntas de ejemplo en caso de error para que la app no se rompa completamente
-    // Opcionalmente, podrías propagar el error o devolver un array vacío.
-    // Por ahora, para mantener la funcionalidad básica de práctica:
-    console.warn("Devolviendo preguntas de ejemplo debido a un error al obtenerlas de Firestore.");
-    return [
-      { id: 'q1_fallback', topic: 'Historia', question: '¿Quién fue el primer presidente de los Estados Unidos?', options: ['Abraham Lincoln', 'George Washington', 'Thomas Jefferson', 'John Adams'], correctAnswer: 'George Washington' },
-      { id: 'q2_fallback', topic: 'Ciencia', question: '¿Cuál es el símbolo químico del agua?', options: ['H2O', 'O2', 'CO2', 'NaCl'], correctAnswer: 'H2O' },
-      { id: 'q3_fallback', topic: 'Geografía', question: '¿Cuál es la capital de Francia?', options: ['Berlín', 'Madrid', 'París', 'Roma'], correctAnswer: 'París' },
-      { id: 'q4_fallback', topic: 'Matemáticas', question: '¿Cuánto es 2 + 2?', options: ['3', '4', '5', '6'], correctAnswer: '4' },
-      { id: 'q5_fallback', topic: 'Literatura', question: '¿Quién escribió "Hamlet"?', options: ['Charles Dickens', 'William Shakespeare', 'Jane Austen', 'Mark Twain'], correctAnswer: 'William Shakespeare' },
-    ];
+    // Considera si devolver preguntas de ejemplo es lo adecuado o si propagar el error.
+    // Devolver un array vacío si falla la carga de Firestore es más predecible.
+    console.warn("Devolviendo un array vacío debido a un error al obtener preguntas de Firestore.");
+    return [];
   }
 }
 
@@ -262,10 +264,11 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
   }
   try {
     const today = new Date();
-    today.setHours(0,0,0,0); 
+    today.setHours(0,0,0,0); // Normalizar a medianoche para consistencia diaria
 
     const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
-    const dailyRecordRef = doc(db, "users", userId, "dailyProgress", today.toISOString().split('T')[0]);
+    const todayDateStr = today.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+    const dailyRecordRef = doc(db, "users", userId, "dailyProgress", todayDateStr);
 
     const batch = writeBatch(db);
 
@@ -273,7 +276,7 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
     let { 
       currentStreak = 0, 
       longestStreak = 0, 
-      totalQuestionsAnswered = 0, 
+      totalQuestionsAnswered: summaryTotalQuestions = 0, // Renombrar para evitar conflicto
       lastPracticeDate = null, 
       completedDates = [] 
     } = summarySnap.exists() ? summarySnap.data() : {};
@@ -284,50 +287,53 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
       jsLastPracticeDate.setHours(0,0,0,0);
     }
 
-    let practiceDayAlreadyRecorded = false;
-    const todayDateStr = today.toISOString().split('T')[0];
-    const processedCompletedDates = (completedDates || []).map((d: any) => {
+    // Procesar completedDates a objetos Date y verificar si hoy ya está registrado
+    let practiceDayAlreadyRecordedForStreak = false;
+    const processedCompletedDates: Date[] = (completedDates || []).map((d: any) => {
         const dateObj = (d instanceof Timestamp) ? d.toDate() : new Date(d);
-        if (dateObj.toISOString().split('T')[0] === todayDateStr) {
-            practiceDayAlreadyRecorded = true;
+        dateObj.setHours(0,0,0,0);
+        if (dateObj.getTime() === today.getTime()) {
+            practiceDayAlreadyRecordedForStreak = true;
         }
         return dateObj;
     });
 
-
-    if (!practiceDayAlreadyRecorded) {
+    if (!practiceDayAlreadyRecordedForStreak) {
         if (jsLastPracticeDate) {
-            const dayDifference = (today.getTime() - jsLastPracticeDate.getTime()) / (1000 * 3600 * 24);
-            if (dayDifference === 1) {
-                currentStreak += 1;
-            } else if (dayDifference > 1) {
-                currentStreak = 1; 
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+            if (jsLastPracticeDate.getTime() === yesterday.getTime()) {
+                currentStreak += 1; // Continuación de racha
+            } else {
+                currentStreak = 1; // Racha rota, se reinicia
             }
-            // If dayDifference is 0, it means they practiced earlier today, currentStreak doesn't change yet
         } else {
-            currentStreak = 1; // First time practicing
+            currentStreak = 1; // Primera vez practicando
+        }
+        
+        // Añadir la fecha de hoy a las completadas solo si no estaba ya
+        if (!processedCompletedDates.some(d => d.getTime() === today.getTime())) {
+            processedCompletedDates.push(today);
         }
     }
-    // If practiceDayAlreadyRecorded is true, currentStreak remains as it was from previous save for today.
-
+    // Si ya practicó hoy, currentStreak no cambia basado en esta sesión.
 
     if (currentStreak > longestStreak) {
       longestStreak = currentStreak;
     }
-    totalQuestionsAnswered += questionsAnswered;
     
-    if (!processedCompletedDates.some(d => d.toISOString().split('T')[0] === todayDateStr)) {
-        processedCompletedDates.push(today); 
-    }
+    // El total de preguntas en el resumen SÍ se actualiza siempre
+    summaryTotalQuestions += questionsAnswered;
 
     batch.set(streakSummaryRef, {
       currentStreak,
       longestStreak,
-      totalQuestionsAnswered,
+      totalQuestionsAnswered: summaryTotalQuestions,
       lastPracticeDate: Timestamp.fromDate(today), 
       completedDates: processedCompletedDates.map(d => Timestamp.fromDate(d)) 
     }, { merge: true });
 
+    // Progreso diario
     const dailyProgressSnap = await getDoc(dailyRecordRef);
     const existingDailyQuestions = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.questionsAnswered : 0;
     const existingTopics = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.topics : [];
@@ -336,7 +342,7 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
     batch.set(dailyRecordRef, {
       questionsAnswered: existingDailyQuestions + questionsAnswered,
       topics: updatedTopics, 
-      date: Timestamp.fromDate(today),
+      date: Timestamp.fromDate(today), // Guardar la fecha del registro diario
     }, { merge: true });
 
     await batch.commit();
@@ -353,7 +359,3 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
     return { error: `Error al registrar la sesión: ${error.message}` };
   }
 }
-
-    
-
-    
