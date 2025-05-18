@@ -11,18 +11,18 @@ import { Loader2, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function PracticeArea() {
-  const { user } = useAuth();
+  const { user, refreshUserAppData } = useAuth(); // Get refreshUserAppData from context
   const { toast } = useToast();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
   const [showResults, setShowResults] = useState(false);
-  const [isLoading, startLoadingTransition] = useTransition();
-  const [isSubmitting, startSubmittingTransition] = useTransition();
+  const [isLoadingQuestions, startLoadingQuestionsTransition] = useTransition();
+  const [isSubmittingSession, startSubmittingSessionTransition] = useTransition();
 
   const fetchQuestions = () => {
-    startLoadingTransition(async () => {
+    startLoadingQuestionsTransition(async () => {
       setShowResults(false);
       setCurrentQuestionIndex(0);
       setScore(0);
@@ -42,33 +42,37 @@ export function PracticeArea() {
     }
     setAnsweredQuestions(answeredQuestions + 1);
 
-    // Automatically move to next question or show results
     setTimeout(() => {
       if (currentQuestionIndex < questions.length - 1) {
         setCurrentQuestionIndex(currentQuestionIndex + 1);
       } else {
         setShowResults(true);
         if (user) {
-          startSubmittingTransition(async () => {
+          startSubmittingSessionTransition(async () => {
             const topics = questions.map(q => q.topic);
             const uniqueTopics = [...new Set(topics)];
-            await recordPracticeSession(user.uid, questions.length, uniqueTopics);
-            toast({ title: "Session Recorded", description: "Your practice has been logged." });
+            const result = await recordPracticeSession(user.uid, score, uniqueTopics); // Pass score as questionsAnswered correctly for streak logic
+            if (result.success) {
+              toast({ title: "Sesión Registrada", description: "Tu práctica ha sido guardada." });
+              await refreshUserAppData(); // Refresh context data
+            } else {
+              toast({ title: "Error al Registrar", description: result.error || "No se pudo guardar la sesión.", variant: "destructive"});
+            }
           });
         }
       }
-    }, 1500); // Delay to see feedback
+    }, 1500); 
   };
 
   const restartPractice = () => {
     fetchQuestions();
   };
 
-  if (isLoading) {
+  if (isLoadingQuestions) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading questions...</p>
+        <p className="ml-4 text-lg">Cargando preguntas...</p>
       </div>
     );
   }
@@ -77,20 +81,20 @@ export function PracticeArea() {
     return (
       <Card className="w-full max-w-2xl mx-auto text-center shadow-xl">
         <CardHeader>
-          <CardTitle className="text-3xl font-bold text-primary">Practice Complete!</CardTitle>
+          <CardTitle className="text-3xl font-bold text-primary">¡Práctica Completa!</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <CardDescription className="text-xl">
-            You scored {score} out of {questions.length}.
+            Obtuviste {score} de {questions.length} correctas.
           </CardDescription>
           <p className="text-muted-foreground">
-            {score / questions.length >= 0.8 ? "Great job! Keep it up!" : 
-             score / questions.length >= 0.5 ? "Good effort! Keep practicing." :
-             "Keep practicing to improve!"}
+            {score / questions.length >= 0.8 ? "¡Excelente trabajo! ¡Sigue así!" : 
+             score / questions.length >= 0.5 ? "¡Buen esfuerzo! Sigue practicando." :
+             "¡Sigue practicando para mejorar!"}
           </p>
-          <Button onClick={restartPractice} size="lg" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Practice Again <RefreshCcw className="ml-2 h-5 w-5" />
+          <Button onClick={restartPractice} size="lg" disabled={isSubmittingSession}>
+            {isSubmittingSession && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Practicar de Nuevo <RefreshCcw className="ml-2 h-5 w-5" />
           </Button>
         </CardContent>
       </Card>
@@ -100,9 +104,9 @@ export function PracticeArea() {
   if (!questions.length || !questions[currentQuestionIndex]) {
     return (
       <div className="text-center py-10">
-        <p className="text-xl text-muted-foreground mb-4">No questions available at the moment. Please try again later.</p>
+        <p className="text-xl text-muted-foreground mb-4">No hay preguntas disponibles en este momento. Por favor, intenta de nuevo más tarde.</p>
         <Button onClick={restartPractice} size="lg">
-            Try Again <RefreshCcw className="ml-2 h-5 w-5" />
+            Intentar de Nuevo <RefreshCcw className="ml-2 h-5 w-5" />
           </Button>
       </div>
     );
@@ -111,7 +115,7 @@ export function PracticeArea() {
   return (
     <div className="space-y-8">
       <div className="text-center text-sm text-muted-foreground">
-        Question {currentQuestionIndex + 1} of {questions.length}
+        Pregunta {currentQuestionIndex + 1} de {questions.length}
       </div>
       <QuestionCard
         key={questions[currentQuestionIndex].id}
@@ -121,3 +125,5 @@ export function PracticeArea() {
     </div>
   );
 }
+
+    

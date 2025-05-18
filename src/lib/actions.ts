@@ -3,12 +3,11 @@
 
 import { auth, db } from "@/lib/firebaseConfig";
 import { 
-  createUserWithEmailAndPassword, 
   signOut as firebaseSignOut,
-  signInWithEmailAndPassword as firebaseSignInWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit, collectionGroup } from "firebase/firestore";
-import { z } from "zod";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
+import { z } from "zod"; // Changed from "import type"
+import type { UserProfile, StreakData } from "@/types"; 
 
 // Tipos para las preguntas, similar al que podrías tener en el frontend
 export interface Question {
@@ -39,98 +38,6 @@ const ProfileUpdateSchema = z.object({
 });
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
-
-export async function signUpUser(values: z.infer<typeof SignUpSchema>) {
-  const validatedFields = SignUpSchema.safeParse(values);
-  if (!validatedFields.success) {
-    return { error: "Campos inválidos.", details: validatedFields.error.flatten().fieldErrors };
-  }
-
-  const { email, password, fullName, age, gender } = validatedFields.data;
-
-  try {
-    // No se necesita crear el usuario con el SDK de Admin si estás usando el SDK de cliente en el frontend
-    // El usuario se crea en el cliente, y luego se puede pasar el UID para crear el doc en Firestore.
-    // Esta acción de servidor ahora asume que el usuario YA FUE CREADO EN FIREBASE AUTH (cliente)
-    // y solo se encarga de crear el documento en Firestore.
-    // Esta función se llamará desde SignupForm.tsx *después* de createUserWithEmailAndPassword en cliente.
-
-    // Simulación de que esta función ya no crea el usuario en Auth.
-    // Si necesitas crear el usuario desde el servidor (lo cual no es el flujo actual para email/pass)
-    // necesitarías el SDK de Admin. Por ahora, esta función es más para guardar datos adicionales.
-    // Sin embargo, el SignupForm.tsx actual crea el usuario y luego el doc de firestore allí mismo.
-    // Esta función 'signUpUser' como está definida aquí NO está siendo usada por SignupForm.tsx para crear el usuario.
-    // SignupForm.tsx crea el usuario en Firebase Auth y luego escribe en Firestore directamente (a través de setDoc).
-
-    // Este bloque es para ilustrar cómo sería si SÍ se usara esta server action POST-auth en cliente:
-    // const user = auth.currentUser; // Esto NO funcionaría en una Server Action sin pasar el user.
-    // if (!user) return { error: "Usuario no autenticado para crear perfil."};
-    
-    // Para el flujo actual, la creación de documento de usuario se hace en SignupForm.tsx.
-    // Esta función podría ser refactorizada o eliminada si toda la lógica está en el cliente.
-    // Dejándola como estaba por si la intención era otra:
-    
-    // Para este ejemplo, vamos a asumir que esta función está siendo llamada con datos del usuario.
-    // PERO, SignupForm.tsx actualmente NO la usa para crear el usuario de Auth.
-    // El siguiente código es más un placeholder si esta acción fuera usada para crear el doc en Firestore.
-
-    // Si esta acción fuera a crear el usuario en Auth Y Firestore (necesitaría SDK Admin para Auth seguro desde servidor):
-    // const userCredential = await admin.auth().createUser({ email, password, displayName: fullName });
-    // const user = userCredential;
-    // ... luego setDoc ...
-    // Pero no estamos usando SDK Admin aquí.
-
-    // Mantengo la estructura original de creación de usuario por si se reutiliza,
-    // pero aclaro que SignupForm.tsx hace esto en el cliente.
-    const userCredential = await firebaseSignInWithEmailAndPassword(auth, email, password); // Esto es incorrecto aquí, debería ser createUser...
-                                                                                          // pero el SignUpForm ya lo hace.
-                                                                                          // Lo mantendré como referencia pero sabiendo que no es el flujo activo.
-
-    const user = userCredential.user; // Esto fallará si la línea de arriba no crea el usuario.
-
-    await setDoc(doc(db, "users", user.uid), {
-      uid: user.uid,
-      email: user.email,
-      fullName,
-      age: age === '' || age === undefined ? null : Number(age),
-      gender: gender || null,
-      createdAt: serverTimestamp(),
-      authProvider: "email",
-      lastLoginAt: serverTimestamp(),
-      practiceTime: 15, // Default practice time
-    });
-    
-    return { success: "¡Cuenta creada! Ahora puedes establecer tu tiempo de práctica o iniciar sesión.", userId: user.uid };
-  } catch (error: any) {
-    console.error("Error al crear la cuenta (actions.ts):", error);
-    let clientErrorMessage = "Error al crear la cuenta. Por favor, inténtalo de nuevo.";
-    if (error.code === 'auth/email-already-in-use') {
-      clientErrorMessage = "Este correo electrónico ya está en uso. Por favor, prueba con un correo diferente o inicia sesión.";
-    } else if (error.code === 'unavailable') {
-      clientErrorMessage = `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})`;
-    } else if (error.code === 'auth/operation-not-allowed') {
-      clientErrorMessage = "El registro con correo electrónico/contraseña no está habilitado. Por favor, habilítalo en tu consola de Firebase (Autenticación -> Método de inicio de sesión).";
-    } else if (error.code === 'auth/configuration-not-found') {
-      clientErrorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
-    } else if (error.message) {
-      clientErrorMessage = `Error al registrarse: ${error.message}`;
-      if (error.code) {
-        clientErrorMessage += ` (Código: ${error.code})`;
-      }
-    }
-    return { error: clientErrorMessage };
-  }
-}
-
-export async function signOutUser() {
-  try {
-    await firebaseSignOut(auth);
-    return { success: "¡Sesión cerrada correctamente!" };
-  } catch (error: any) {
-    console.error("Error al cerrar sesión:", error);
-    return { error: `Error al cerrar sesión: ${error.message}` };
-  }
-}
 
 export async function savePracticeTime(userId: string, values: z.infer<typeof PracticeTimeSchema>) {
   const validatedFields = PracticeTimeSchema.safeParse(values);
@@ -166,23 +73,21 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
   const dataToUpdate: { [key: string]: any } = {};
   const parsedData = validatedFields.data;
 
-  // Solo añadir campos al objeto de actualización si están definidos y no son una cadena vacía (excepto para 'age' y 'gender' que pueden ser null/undefined para borrar)
   if (parsedData.fullName !== undefined) dataToUpdate.fullName = parsedData.fullName;
   
-  if (parsedData.age === null || parsedData.age === undefined) { // Si se quiere borrar la edad
-    dataToUpdate.age = null;
+  if (parsedData.age === null || parsedData.age === undefined) { 
+    dataToUpdate.age = null; 
   } else if (typeof parsedData.age === 'number' && !isNaN(parsedData.age)) {
     dataToUpdate.age = parsedData.age;
   }
 
-  if (parsedData.gender === null || parsedData.gender === undefined || parsedData.gender === "") { // Si se quiere borrar el género
-     dataToUpdate.gender = null;
-  } else if (parsedData.gender) {
+  if (parsedData.gender === null || parsedData.gender === undefined || parsedData.gender === "") {
+     dataToUpdate.gender = null; 
+  } else if (parsedData.gender) { 
      dataToUpdate.gender = parsedData.gender;
   }
 
   if (parsedData.practiceTime !== undefined) dataToUpdate.practiceTime = parsedData.practiceTime;
-
 
   if (Object.keys(dataToUpdate).length === 0) {
     return { success: "No hay cambios para actualizar." };
@@ -192,8 +97,7 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
     const userDocRef = doc(db, "users", userId);
     await updateDoc(userDocRef, dataToUpdate);
     return { success: "¡Perfil actualizado correctamente!" };
-  } catch (error: any)
- {
+  } catch (error: any) {
     console.error("Error al actualizar el perfil (actions.ts):", error);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
@@ -207,39 +111,54 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
   }
 }
 
-export async function getUserProfile(userId: string) {
+export async function signOutUser(): Promise<{ success?: string; error?: string }> {
+  try {
+    await firebaseSignOut(auth); 
+    return { success: "Sesión cerrada correctamente." };
+  } catch (error: any) {
+    console.error("Error al cerrar sesión (actions.ts):", error);
+    return { error: `Error al cerrar sesión: ${error.message}` };
+  }
+}
+
+export async function getUserProfile(userId: string): Promise<{ success: boolean, data?: UserProfile, error?: string }> {
   try {
     const userDocRef = doc(db, "users", userId);
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
-      const data = docSnap.data();
-      // Convertir Timestamps de Firestore a objetos Date si es necesario
-      const profileData = { ...data };
+      const data = docSnap.data() as UserProfile; 
+      const profileData: UserProfile = { ...data, uid: userId }; // Ensure uid is part of the returned profile
+
+      // Convert Timestamps from Firestore to Date objects if necessary for client-side
       if (data.createdAt && data.createdAt instanceof Timestamp) {
         profileData.createdAt = data.createdAt.toDate();
       }
       if (data.lastLoginAt && data.lastLoginAt instanceof Timestamp) {
         profileData.lastLoginAt = data.lastLoginAt.toDate();
       }
+      // Ensure age is a number or empty string for form compatibility
+      profileData.age = data.age === undefined || data.age === null ? '' : Number(data.age);
+      
       return { success: true, data: profileData };
     } else {
       console.warn(`Perfil de usuario no encontrado en Firestore para UID: ${userId}`);
-      return { error: "Perfil de usuario no encontrado." };
+      return { success: false, error: "Perfil de usuario no encontrado." };
     }
   } catch (error: any) {
     console.error("Error al obtener el perfil:", error);
      if (error.code === 'unavailable') {
-      return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
+      return { success: false, error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied') {
-      return { error: "Error al obtener el perfil debido a permisos de Firestore." };
+      return { success: false, error: "Error al obtener el perfil debido a permisos de Firestore." };
     }
-    return { error: `Error al obtener el perfil: ${error.message}` };
+    return { success: false, error: `Error al obtener el perfil: ${error.message}` };
   }
 }
 
-export async function getStudyStreakData(userId: string) {
+export async function getStudyStreakData(userId: string): Promise<StreakData> {
   const userDocRef = doc(db, "users", userId, "streaks", "summary");
+  console.log(`[getStudyStreakData] Fetching for userId: ${userId}`);
   try {
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
@@ -248,83 +167,47 @@ export async function getStudyStreakData(userId: string) {
         if (ts instanceof Timestamp) {
           return ts.toDate();
         }
-        // Si ya es un string de fecha ISO, o un objeto Date, conviértelo a Date
         if (typeof ts === 'string' || ts instanceof Date) {
             const dateObj = new Date(ts);
             if (!isNaN(dateObj.getTime())) return dateObj;
         }
-        // Fallback por si es un formato inesperado, intenta crear una fecha.
-        // Podrías necesitar un manejo más robusto si los formatos varían mucho.
         const parsedDate = new Date(ts);
-        return isNaN(parsedDate.getTime()) ? new Date() : parsedDate; // Evita fechas inválidas
-      });
-      return {
+        return isNaN(parsedDate.getTime()) ? new Date(0) : parsedDate; 
+      }).filter((d: Date) => d.getTime() !== new Date(0).getTime()); 
+
+      const streakSummary = {
         currentStreak: data.currentStreak || 0,
         longestStreak: data.longestStreak || 0,
         totalQuestionsAnswered: data.totalQuestionsAnswered || 0,
         completedDates: completedDates,
       };
+      console.log(`[getStudyStreakData] Data found for ${userId}:`, streakSummary);
+      return streakSummary;
     } else {
+      console.log(`[getStudyStreakData] No data found for ${userId}, returning defaults.`);
       return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
     }
   } catch(error: any) {
-    console.error("Error al obtener datos de racha:", error);
+    console.error("[getStudyStreakData] Error fetching streak data:", error);
     if (error.code === 'unavailable' || error.code === 'permission-denied') {
-      console.error(`Error de Firestore (Código: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
+      console.error(`[getStudyStreakData] Firestore Error (Code: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
     }
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
 
 const exampleQuestionsData: Question[] = [
-  {
-    id: "geo1",
-    topic: "Geografía Mundial",
-    question: "¿Cuál es el río más largo del mundo?",
-    options: ["Amazonas", "Nilo", "Yangtsé", "Misisipi"],
-    correctAnswer: "Amazonas", // Aunque históricamente se consideraba el Nilo, mediciones recientes suelen dar al Amazonas. Puedes ajustar esto.
-  },
-  {
-    id: "sci1",
-    topic: "Ciencia Elemental",
-    question: "¿Cuál es el símbolo químico del oro?",
-    options: ["Ag", "Au", "Pb", "Fe"],
-    correctAnswer: "Au",
-  },
-  {
-    id: "his1",
-    topic: "Historia Antigua",
-    question: "¿En qué año cayó el Imperio Romano de Occidente?",
-    options: ["410 d.C.", "476 d.C.", "395 d.C.", "1453 d.C."],
-    correctAnswer: "476 d.C.",
-  },
-  {
-    id: "lit1",
-    topic: "Literatura Clásica",
-    question: "¿Quién escribió 'Don Quijote de la Mancha'?",
-    options: ["William Shakespeare", "Miguel de Cervantes", "Homero", "Dante Alighieri"],
-    correctAnswer: "Miguel de Cervantes",
-  },
-  {
-    id: "art1",
-    topic: "Arte Renacentista",
-    question: "¿Quién pintó la 'Mona Lisa'?",
-    options: ["Miguel Ángel", "Rafael Sanzio", "Leonardo da Vinci", "Tiziano"],
-    correctAnswer: "Leonardo da Vinci",
-  }
+  { id: "geo1", topic: "Geografía Mundial", question: "¿Cuál es el río más largo del mundo?", options: ["Amazonas", "Nilo", "Yangtsé", "Misisipi"], correctAnswer: "Amazonas" },
+  { id: "sci1", topic: "Ciencia Elemental", question: "¿Cuál es el símbolo químico del oro?", options: ["Ag", "Au", "Pb", "Fe"], correctAnswer: "Au" },
+  { id: "mat1", topic: "Matemáticas Básicas", question: "¿Cuánto es 2 + 2?", options: ["3", "4", "5", "22"], correctAnswer: "4" },
+  { id: "his1", topic: "Historia Universal", question: "¿En qué año comenzó la Segunda Guerra Mundial?", options: ["1939", "1941", "1914", "1945"], correctAnswer: "1939" },
+  { id: "lit1", topic: "Literatura Clásica", question: "¿Quién escribió 'Don Quijote de la Mancha'?", options: ["Miguel de Cervantes", "William Shakespeare", "Homero", "Dante Alighieri"], correctAnswer: "Miguel de Cervantes" },
 ];
-
 
 export async function getPracticeQuestions(): Promise<Question[]> {
   try {
     const questionsColRef = collection(db, 'questions');
-    // Intenta obtener un número limitado de preguntas para no sobrecargar si hay muchas.
-    // Para aleatoriedad real, necesitarías una solución más compleja o leer todas y seleccionar en el cliente/servidor.
-    // Firestore no soporta "ORDER BY RANDOM()" directamente de forma eficiente para grandes datasets.
-    // Una estrategia común es obtener N documentos y luego barajar.
-    // Otra es tener un campo 'random' y hacer query sobre él, pero requiere mantener ese campo.
-    
-    const querySnapshot = await getDocs(query(questionsColRef, limit(20))); // Obtener hasta 20 preguntas
+    const querySnapshot = await getDocs(query(questionsColRef, limit(20))); 
     
     const allQuestions: Question[] = [];
     querySnapshot.forEach((docSnap) => {
@@ -332,41 +215,56 @@ export async function getPracticeQuestions(): Promise<Question[]> {
     });
 
     if (allQuestions.length === 0) {
-      console.warn("No se encontraron preguntas en la colección 'questions' de Firestore. Devolviendo preguntas de ejemplo.");
+      console.warn("[getPracticeQuestions] No se encontraron preguntas en Firestore. Devolviendo preguntas de ejemplo.");
       return exampleQuestionsData;
     }
 
-    // Barajar las preguntas obtenidas y seleccionar 5 (o menos si hay menos de 5)
     const shuffledQuestions = allQuestions.sort(() => 0.5 - Math.random());
-    const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length)); // Tomar hasta 5
+    const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length));
     
-    console.log(`Se seleccionaron ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore.`);
+    console.log(`[getPracticeQuestions] Seleccionadas ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore.`);
     return selectedQuestions;
 
   } catch (error: any) {
-    console.error("Error al obtener las preguntas de práctica desde Firestore:", error);
+    console.error("[getPracticeQuestions] Error al obtener preguntas de práctica de Firestore:", error);
     if (error.code === 'unavailable') {
-      console.error(`Error de Firestore (Código: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
+      console.error(`[getPracticeQuestions] Error de Firestore (Código: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
     } else if (error.code === 'permission-denied') {
-      console.error("Error de permisos al leer la colección 'questions'. Asegúrate de que las reglas de seguridad de Firestore lo permitan.");
+      console.error("[getPracticeQuestions] Permiso denegado al leer la colección 'questions'. Revisa las reglas de seguridad de Firestore.");
     }
-    console.warn("Devolviendo preguntas de ejemplo debido a un error al obtener preguntas de Firestore.");
+    console.warn("[getPracticeQuestions] Devolviendo preguntas de ejemplo debido a un error.");
     return exampleQuestionsData;
   }
 }
 
+export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
+  console.log(`[recordPracticeSession] Iniciando para userId: ${userId}, preguntasRespondidasCorrectamente: ${questionsAnsweredCorrectly}, temasCubiertos:`, topicsCovered);
 
-export async function recordPracticeSession(userId: string, questionsAnswered: number, topicsCovered: string[]) {
   if (!userId) {
-    console.error("ID de usuario faltante para registrar la sesión de práctica.");
+    console.error("[recordPracticeSession] Error: Falta userId.");
     return { error: "ID de usuario faltante." };
   }
+
+  // Solo proceder si se respondieron preguntas correctamente
+  if (questionsAnsweredCorrectly <= 0) {
+    console.log("[recordPracticeSession] No se respondieron preguntas correctamente, no se actualiza la racha ni el progreso diario.");
+    // Opcionalmente, se podría actualizar el total de preguntas respondidas (aunque no correctas) si se tuviera ese dato.
+    // Por ahora, simplemente retornamos un mensaje indicando que no hay nada que actualizar para la racha.
+    const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
+    const summarySnap = await getDoc(streakSummaryRef);
+    if (summarySnap.exists()) {
+        const currentTotal = summarySnap.data().totalQuestionsAnswered || 0;
+        await updateDoc(streakSummaryRef, { totalQuestionsAnswered: currentTotal }); // No cambia, pero toca el doc si se quisiera
+    }
+    return { success: "No hay preguntas correctas para actualizar la racha." };
+  }
+
   try {
     const today = new Date();
-    today.setHours(0,0,0,0); 
+    today.setHours(0, 0, 0, 0); 
+    console.log(`[recordPracticeSession] Hoy (normalizado): ${today.toISOString()}`);
 
     const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
-    // Usar un formato consistente para el ID del documento diario, ej: YYYY-MM-DD
     const todayDateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const dailyRecordRef = doc(db, "users", userId, "dailyProgress", todayDateStr);
 
@@ -377,82 +275,95 @@ export async function recordPracticeSession(userId: string, questionsAnswered: n
       currentStreak = 0, 
       longestStreak = 0, 
       totalQuestionsAnswered: summaryTotalQuestions = 0, 
-      lastPracticeDate = null, // Este será un Timestamp de Firestore o null
-      completedDates = [] // Este será un array de Timestamps de Firestore
+      lastPracticeDate, // Firestore Timestamp or undefined
+      completedDates = [] // Array of Firestore Timestamps or JS Dates if read before
     } = summarySnap.exists() ? summarySnap.data() : {};
     
-    let jsLastPracticeDate: Date | null = null;
-    if (lastPracticeDate && lastPracticeDate instanceof Timestamp) {
-      jsLastPracticeDate = lastPracticeDate.toDate();
-      jsLastPracticeDate.setHours(0,0,0,0); // Normalizar a medianoche
-    }
+    console.log("[recordPracticeSession] Resumen de racha inicial de Firestore:", { currentStreak, longestStreak, summaryTotalQuestions, lastPracticeDate: lastPracticeDate?.toDate?.().toISOString(), completedDates: completedDates.map((d: any) => d instanceof Timestamp ? d.toDate().toISOString() : new Date(d).toISOString()) });
 
-    let practiceDayAlreadyRecordedForStreak = false;
-    const processedCompletedDates: Date[] = (completedDates || []).map((d: Timestamp) => {
-        const dateObj = d.toDate(); // Asumimos que d es un Timestamp
-        dateObj.setHours(0,0,0,0); // Normalizar a medianoche
-        if (dateObj.getTime() === today.getTime()) {
-            practiceDayAlreadyRecordedForStreak = true;
-        }
+    let completedDatesJS: Date[] = (completedDates || []).map((d: Timestamp | Date | string) => {
+        let dateObj: Date;
+        if (d instanceof Timestamp) dateObj = d.toDate();
+        else if (d instanceof Date) dateObj = new Date(d.getTime()); // Clonar para evitar mutaciones
+        else dateObj = new Date(d); // Intentar parsear si es string
+
+        if (isNaN(dateObj.getTime())) return new Date(0); // Para filtrar fechas inválidas
+        dateObj.setHours(0, 0, 0, 0);
         return dateObj;
-    });
+    }).filter((d: Date) => d.getTime() !== new Date(0).getTime());
 
-    if (!practiceDayAlreadyRecordedForStreak) {
-        if (jsLastPracticeDate) {
+    console.log("[recordPracticeSession] completedDatesJS procesadas (normalizadas):", completedDatesJS.map(d => d.toISOString()));
+
+    const practiceDayAlreadyRecorded = completedDatesJS.some(d => d.getTime() === today.getTime());
+    console.log(`[recordPracticeSession] ¿Día de práctica ya registrado para hoy?: ${practiceDayAlreadyRecorded}`);
+
+    if (!practiceDayAlreadyRecorded) {
+        console.log("[recordPracticeSession] Hoy no se ha registrado práctica. Calculando nueva racha...");
+        const lastPracticeDateJS = lastPracticeDate instanceof Timestamp ? lastPracticeDate.toDate() : (lastPracticeDate ? new Date(lastPracticeDate) : null);
+        if (lastPracticeDateJS) {
+            lastPracticeDateJS.setHours(0,0,0,0);
+            console.log(`[recordPracticeSession] Última fecha de práctica (normalizada): ${lastPracticeDateJS.toISOString()}`);
             const yesterday = new Date(today);
-            yesterday.setDate(today.getDate() - 1); // Ayer a medianoche
-            if (jsLastPracticeDate.getTime() === yesterday.getTime()) {
+            yesterday.setDate(today.getDate() - 1);
+            // No es necesario normalizar 'yesterday' aquí ya que 'today' ya está normalizada y solo restamos un día.
+             console.log(`[recordPracticeSession] Ayer (calculado desde 'today' normalizado): ${yesterday.toISOString()}`);
+
+
+            if (lastPracticeDateJS.getTime() === yesterday.getTime()) {
                 currentStreak += 1; 
-            } else if (jsLastPracticeDate.getTime() !== today.getTime()) { // No es hoy ni ayer
+                console.log("[recordPracticeSession] Racha continuada. Nueva racha actual:", currentStreak);
+            } else { 
                 currentStreak = 1; 
+                console.log("[recordPracticeSession] Racha rota o primera práctica después de un espacio. Nueva racha actual:", currentStreak);
             }
-            // Si jsLastPracticeDate ES today, significa que ya se registró hoy (no debería entrar aquí por practiceDayAlreadyRecordedForStreak)
-        } else { // No hay lastPracticeDate, así que esta es la primera práctica
+        } else { 
             currentStreak = 1; 
+            console.log("[recordPracticeSession] Primera práctica registrada. Nueva racha actual:", currentStreak);
         }
         
-        // Añadir 'today' a completedDates si no está ya (lo que no debería pasar si practiceDayAlreadyRecordedForStreak es false)
-        if (!processedCompletedDates.some(d => d.getTime() === today.getTime())) {
-            processedCompletedDates.push(today);
+        if (currentStreak > longestStreak) {
+            longestStreak = currentStreak;
+            console.log("[recordPracticeSession] Nueva racha más larga:", longestStreak);
         }
+        
+        completedDatesJS.push(today); 
+        console.log("[recordPracticeSession] Hoy añadido a completedDatesJS. Nuevo array:", completedDatesJS.map(d => d.toISOString()));
     } else {
-      // Si ya se practicó hoy, no actualizamos la racha, pero sí el lastPracticeDate si esta sesión es posterior
-      // (aunque Firestore lo actualizará a 'today' igualmente)
-    }
-
-
-    if (currentStreak > longestStreak) {
-      longestStreak = currentStreak;
+      console.log("[recordPracticeSession] Ya se practicó hoy. Racha no modificada. Solo se actualizará el total de preguntas y el progreso diario.");
     }
     
-    summaryTotalQuestions += questionsAnswered;
+    summaryTotalQuestions += questionsAnsweredCorrectly; 
+    console.log("[recordPracticeSession] Total de preguntas respondidas actualizado:", summaryTotalQuestions);
 
-    batch.set(streakSummaryRef, {
+    const dataForSummary = {
       currentStreak,
       longestStreak,
       totalQuestionsAnswered: summaryTotalQuestions,
-      lastPracticeDate: Timestamp.fromDate(today), // Siempre actualizar a 'hoy'
-      // Guardar completedDates como Timestamps de Firestore
-      completedDates: processedCompletedDates.map(d => Timestamp.fromDate(d)) 
-    }, { merge: true });
+      lastPracticeDate: Timestamp.fromDate(today), 
+      completedDates: completedDatesJS.map(d => Timestamp.fromDate(d)) 
+    };
+    console.log("[recordPracticeSession] Datos para escribir en el resumen de racha:", dataForSummary);
+    batch.set(streakSummaryRef, dataForSummary, { merge: true });
 
-    // Para el progreso diario
     const dailyProgressSnap = await getDoc(dailyRecordRef);
     const existingDailyQuestions = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.questionsAnswered : 0;
     const existingTopics = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.topics : [];
     const updatedTopics = Array.from(new Set([...existingTopics, ...topicsCovered]));
     
-    batch.set(dailyRecordRef, {
-      questionsAnswered: existingDailyQuestions + questionsAnswered,
+    const dataForDaily = {
+      questionsAnswered: existingDailyQuestions + questionsAnsweredCorrectly,
       topics: updatedTopics, 
-      date: Timestamp.fromDate(today), // Guardar la fecha del registro
-    }, { merge: true });
+      date: Timestamp.fromDate(today), 
+    };
+    console.log("[recordPracticeSession] Datos para escribir en el progreso diario:", dataForDaily);
+    batch.set(dailyRecordRef, dataForDaily, { merge: true });
 
     await batch.commit();
+    console.log("[recordPracticeSession] Batch commit exitoso.");
 
     return { success: "¡Sesión de práctica registrada!" };
   } catch (error: any) {
-    console.error("Error al registrar la sesión de práctica:", error);
+    console.error("[recordPracticeSession] Error durante la operación:", error);
      if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
