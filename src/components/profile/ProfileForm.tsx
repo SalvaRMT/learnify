@@ -46,12 +46,12 @@ const practiceTimeOptions = [
 ];
 
 export function ProfileForm() {
-  const { user, userProfile, fetchUserAppData, loading: authLoading } = useAuth(); // Changed fetchUserProfile to fetchUserAppData
+  const { user, userProfile, fetchUserAppData, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [isUpdating, startUpdateTransition] = useTransition();
   const [isSigningOut, startSignOutTransition] = useTransition();
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true); // Local loading state for profile data
 
   const form = useForm<z.infer<typeof ProfileUpdateSchema>>({
     resolver: zodResolver(ProfileUpdateSchema),
@@ -63,52 +63,75 @@ export function ProfileForm() {
     },
   });
 
+  // Effect to reset form when userProfile data is available or changes
   useEffect(() => {
-    console.log("ProfileForm useEffect: authLoading, user, userProfile", authLoading, !!user, !!userProfile);
-    if (userProfile) {
+    console.log("ProfileForm useEffect [userProfile, authLoading]: authLoading:", authLoading, "userProfile exists:", !!userProfile);
+    if (!authLoading && userProfile) {
       form.reset({
         fullName: userProfile.fullName || "",
         age: userProfile.age === undefined || userProfile.age === null ? '' : Number(userProfile.age),
         gender: userProfile.gender || "",
         practiceTime: userProfile.practiceTime || 15,
       });
-      setIsLoadingProfile(false);
-      console.log("ProfileForm: Profile data loaded and form reset.", userProfile);
-    } else if (user && !authLoading && !userProfile) {
-      console.log("ProfileForm: User exists, auth not loading, but no profile. Fetching profile...");
+      setIsLoadingProfile(false); // Profile is loaded
+      console.log("ProfileForm: Profile data loaded into form:", userProfile);
+    } else if (!authLoading && user && !userProfile) {
+      // User is loaded, auth is done, but no profile yet. Keep showing loading.
       setIsLoadingProfile(true);
-      fetchUserAppData(user.uid).finally(() => { // Changed fetchUserProfile to fetchUserAppData
-        console.log("ProfileForm: fetchUserAppData attempt finished in useEffect.");
-        // The AuthContext's userProfile state will trigger another re-render if successful
-        // For now, if it's still null after fetch, stop local loading
-        const currentContextProfile = useAuth.getState().userProfile; // Check latest state if possible or rely on re-render
-        if (!currentContextProfile) setIsLoadingProfile(false);
-      });
-    } else if (!user && !authLoading) {
-        setIsLoadingProfile(false);
-        console.log("ProfileForm: No user and auth not loading. No profile to load.");
+      console.log("ProfileForm: User loaded, no profile yet. Kept isLoadingProfile true.");
+    } else if (authLoading && user) {
+      // Auth is loading, user might be available from a previous session, wait for auth to finish
+      setIsLoadingProfile(true);
+      console.log("ProfileForm: Auth is loading, waiting for profile...");
+    } else if (!authLoading && !user) {
+      // No user, auth is done, so no profile to load
+      setIsLoadingProfile(false);
+      console.log("ProfileForm: No user and auth not loading. No profile to load.");
     }
-  }, [userProfile, user, authLoading, form, fetchUserAppData]);
+  }, [userProfile, authLoading, form, user]);
+
+
+  // Effect to fetch user profile if it's missing after initial auth check
+  useEffect(() => {
+    console.log("ProfileForm useEffect [user, authLoading, userProfile, fetchUserAppData]: user:",!!user, "authLoading:", authLoading, "userProfile exists:", !!userProfile)
+    if (user && !authLoading && !userProfile && !isLoadingProfile) { // only fetch if not already loading profile locally
+      console.log("ProfileForm: User exists, auth not loading, profile missing. Attempting to fetch profile.");
+      setIsLoadingProfile(true);
+      fetchUserAppData(user.uid).finally(() => {
+        // AuthContext will update userProfile, triggering the other useEffect to reset the form.
+        // We only set local loading to false here if the fetch is done.
+        // The actual population of the form happens when userProfile changes.
+        setIsLoadingProfile(false); 
+        console.log("ProfileForm: fetchUserAppData attempt finished in useEffect. Local isLoadingProfile set to false.");
+      });
+    }
+  }, [user, authLoading, userProfile, fetchUserAppData, isLoadingProfile]);
 
 
   function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
     
     const finalValues: { [key: string]: any } = {};
+    // Only include fields that have actually changed from the current profile
+    // or are being set for the first time.
     if (values.fullName !== undefined && values.fullName !== (userProfile?.fullName || "")) {
       finalValues.fullName = values.fullName;
     }
     
-    const ageFromForm = values.age === '' ? undefined : Number(values.age);
-    const ageFromProfile = userProfile?.age === '' ? undefined : Number(userProfile?.age);
+    const ageFromForm = values.age === '' || values.age === undefined ? null : Number(values.age);
+    const ageFromProfile = userProfile?.age === '' || userProfile?.age === undefined || userProfile?.age === null ? null : Number(userProfile.age);
 
     if (ageFromForm !== ageFromProfile) {
-       finalValues.age = ageFromForm === undefined ? null : ageFromForm; // Send null to clear or number
+       finalValues.age = ageFromForm; 
     }
 
-    if (values.gender !== undefined && values.gender !== (userProfile?.gender || "")) {
-      finalValues.gender = values.gender === "" ? null : values.gender; // Send null to clear
+    const genderFromForm = values.gender === "" || values.gender === undefined ? null : values.gender;
+    const genderFromProfile = userProfile?.gender === "" || userProfile?.gender === undefined || userProfile?.gender === null ? null : userProfile.gender;
+
+    if (genderFromForm !== genderFromProfile) {
+      finalValues.gender = genderFromForm;
     }
+
     if (values.practiceTime !== undefined && values.practiceTime !== (userProfile?.practiceTime || 15)) {
       finalValues.practiceTime = values.practiceTime;
     }
@@ -124,13 +147,13 @@ export function ProfileForm() {
       if (result.error) {
         toast({ 
             title: "Fallo al Actualizar", 
-            description: result.error, 
+            description: result.error, // This will now show the more specific error from actions.ts
             variant: "destructive",
             duration: 9000, 
         });
       } else {
         toast({ title: "Perfil Actualizado", description: result.success });
-        if(user.uid) {
+        if(user.uid) { // Ensure user.uid is still valid
             await fetchUserAppData(user.uid); // Refresh profile data in context
         }
       }
@@ -144,13 +167,13 @@ export function ProfileForm() {
         toast({ title: "Fallo al Cerrar Sesión", description: result.error, variant: "destructive" });
       } else {
         toast({ title: "Sesión Cerrada", description: "Has cerrado sesión correctamente." });
-        router.push("/login");
+        router.push("/login"); // Redirect to login after sign out
       }
     });
   };
   
-  // Show main loading if AuthContext is still loading or if local profile loading is true AND user exists
-  if (authLoading || (isLoadingProfile && user)) {
+  // Main loading state: either AuthContext is loading, or we are locally loading profile
+  if (authLoading || (isLoadingProfile && user && !userProfile)) {
       return (
           <div className="flex justify-center items-center py-10">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -248,7 +271,7 @@ export function ProfileForm() {
               )}
             />
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
-              <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading || (isLoadingProfile && !!user)}>
+              <Button type="submit" className="w-full sm:w-auto" disabled={isUpdating || authLoading || isLoadingProfile}>
                 {(isUpdating) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Guardar Cambios
               </Button>
@@ -268,4 +291,3 @@ export function ProfileForm() {
     </Card>
   );
 }
-
