@@ -6,7 +6,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod"; // Changed from "import type"
+import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types"; 
 
 // Tipos para las preguntas, similar al que podrías tener en el frontend
@@ -97,7 +97,8 @@ export async function updateUserProfile(userId: string, values: Partial<z.infer<
     const userDocRef = doc(db, "users", userId);
     await updateDoc(userDocRef, dataToUpdate);
     return { success: "¡Perfil actualizado correctamente!" };
-  } catch (error: any) {
+  } catch (error: any)
+ {
     console.error("Error al actualizar el perfil (actions.ts):", error);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
@@ -124,20 +125,22 @@ export async function signOutUser(): Promise<{ success?: string; error?: string 
 export async function getUserProfile(userId: string): Promise<{ success: boolean, data?: UserProfile, error?: string }> {
   try {
     const userDocRef = doc(db, "users", userId);
+    // CRUCIAL: Las reglas de seguridad de Firestore deben permitir 'read' en este documento
+    // para el usuario autenticado (ej: allow read: if request.auth.uid == userId;).
+    // Si esta operación falla con 'permission-denied', el perfil no se cargará.
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
       const data = docSnap.data() as UserProfile; 
-      const profileData: UserProfile = { ...data, uid: userId }; // Ensure uid is part of the returned profile
+      const profileData: UserProfile = { ...data, uid: userId }; 
 
-      // Convert Timestamps from Firestore to Date objects if necessary for client-side
       if (data.createdAt && data.createdAt instanceof Timestamp) {
         profileData.createdAt = data.createdAt.toDate();
       }
       if (data.lastLoginAt && data.lastLoginAt instanceof Timestamp) {
         profileData.lastLoginAt = data.lastLoginAt.toDate();
       }
-      // Ensure age is a number or empty string for form compatibility
-      profileData.age = data.age === undefined || data.age === null ? '' : Number(data.age);
+      
+      profileData.age = data.age === undefined || data.age === null || data.age === '' ? '' : Number(data.age);
       
       return { success: true, data: profileData };
     } else {
@@ -245,16 +248,19 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     return { error: "ID de usuario faltante." };
   }
 
-  // Solo proceder si se respondieron preguntas correctamente
   if (questionsAnsweredCorrectly <= 0) {
     console.log("[recordPracticeSession] No se respondieron preguntas correctamente, no se actualiza la racha ni el progreso diario.");
-    // Opcionalmente, se podría actualizar el total de preguntas respondidas (aunque no correctas) si se tuviera ese dato.
-    // Por ahora, simplemente retornamos un mensaje indicando que no hay nada que actualizar para la racha.
+    // Solo se actualiza el total de preguntas si ya existe un resumen
     const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
-    const summarySnap = await getDoc(streakSummaryRef);
-    if (summarySnap.exists()) {
-        const currentTotal = summarySnap.data().totalQuestionsAnswered || 0;
-        await updateDoc(streakSummaryRef, { totalQuestionsAnswered: currentTotal }); // No cambia, pero toca el doc si se quisiera
+    try {
+        const summarySnap = await getDoc(streakSummaryRef);
+        if (summarySnap.exists()) {
+            const currentTotal = summarySnap.data().totalQuestionsAnswered || 0;
+            // No hay cambio real en totalQuestionsAnswered si questionsAnsweredCorrectly es 0
+            // await updateDoc(streakSummaryRef, { totalQuestionsAnswered: currentTotal }); 
+        }
+    } catch (e:any) {
+        console.warn(`[recordPracticeSession] No se pudo acceder al resumen de racha para actualizar totalQuestions (puede que aún no exista o por permisos): ${e.message}`);
     }
     return { success: "No hay preguntas correctas para actualizar la racha." };
   }
@@ -284,10 +290,10 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     let completedDatesJS: Date[] = (completedDates || []).map((d: Timestamp | Date | string) => {
         let dateObj: Date;
         if (d instanceof Timestamp) dateObj = d.toDate();
-        else if (d instanceof Date) dateObj = new Date(d.getTime()); // Clonar para evitar mutaciones
-        else dateObj = new Date(d); // Intentar parsear si es string
+        else if (d instanceof Date) dateObj = new Date(d.getTime()); 
+        else dateObj = new Date(d); 
 
-        if (isNaN(dateObj.getTime())) return new Date(0); // Para filtrar fechas inválidas
+        if (isNaN(dateObj.getTime())) return new Date(0); 
         dateObj.setHours(0, 0, 0, 0);
         return dateObj;
     }).filter((d: Date) => d.getTime() !== new Date(0).getTime());
@@ -305,9 +311,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
             console.log(`[recordPracticeSession] Última fecha de práctica (normalizada): ${lastPracticeDateJS.toISOString()}`);
             const yesterday = new Date(today);
             yesterday.setDate(today.getDate() - 1);
-            // No es necesario normalizar 'yesterday' aquí ya que 'today' ya está normalizada y solo restamos un día.
              console.log(`[recordPracticeSession] Ayer (calculado desde 'today' normalizado): ${yesterday.toISOString()}`);
-
 
             if (lastPracticeDateJS.getTime() === yesterday.getTime()) {
                 currentStreak += 1; 
@@ -368,8 +372,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied') {
-      return { error: `Error al registrar la sesión debido a permisos de Firestore. (Código: ${error.code})` };
+      return { error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir en las subcolecciones '/users/{userId}/streaks/summary' Y '/users/{userId}/dailyProgress/{dateId}'. La regla común para subcolecciones es 'allow write: if request.auth.uid == userId;' dentro de 'match /users/{userId} { match /streaks/summary { ... } }'. (Código: ${error.code})` };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
   }
 }
+
