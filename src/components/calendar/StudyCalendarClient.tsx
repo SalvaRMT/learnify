@@ -7,14 +7,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import { format } from 'date-fns';
-// StreakData is now imported from @/types
-// import type { StreakData } from "@/types"; 
+import { es } from 'date-fns/locale'; // Changed from require to import
 
 export function StudyCalendarClient() {
   const { streakData, loading: authLoading } = useAuth(); // Use streakData and loading from AuthContext
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-
-  // useEffect to fetch data is removed, as AuthContext now handles it.
 
   const completedOnSelectedDate = selectedDate && streakData?.completedDates.some(
     d => d.getFullYear() === selectedDate.getFullYear() &&
@@ -59,8 +56,8 @@ export function StudyCalendarClient() {
               selectedDate && (
                 <p className="text-sm text-center pt-2">
                   {completedOnSelectedDate ? 
-                    `Completaste la práctica el ${format(selectedDate, 'PPP', { locale: require('date-fns/locale/es') })}.` :
-                    `No hay práctica registrada para el ${format(selectedDate, 'PPP', { locale: require('date-fns/locale/es') })}.`
+                    `Completaste la práctica el ${format(selectedDate, 'PPP', { locale: es })}.` : // Used imported 'es'
+                    `No hay práctica registrada para el ${format(selectedDate, 'PPP', { locale: es })}.` // Used imported 'es'
                   }
                 </p>
               )
@@ -89,5 +86,3 @@ export function StudyCalendarClient() {
     </div>
   );
 }
-
-    
