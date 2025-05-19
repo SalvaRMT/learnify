@@ -30,33 +30,32 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-// ensureGoogleUserInFirestore import was removed as Google Sign-In functionality was removed.
 import { Loader2 } from "lucide-react";
-import { useAuth } from "@/context/AuthContext"; 
+// useAuth no es necesario aquí si la creación del perfil y la navegación la maneja el AuthContext
+// import { useAuth } from "@/context/AuthContext"; 
 
 const SignUpSchema = z.object({
-  fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres."),
-  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? undefined : Number(val)),
-  gender: z.string().min(1, "Por favor selecciona un género.").optional().or(z.literal('')),
+  nombreCompleto: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres."),
+  edad: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? null : Number(val)),
+  genero: z.string().min(1, "Por favor selecciona un género.").optional().or(z.literal('')).transform(val => val === '' ? null : val),
   email: z.string().email("Dirección de correo electrónico inválida."),
-  password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres."),
+  contrasena: z.string().min(6, "La contraseña debe tener al menos 6 caracteres."),
 });
 
 export function SignupForm() {
   const router = useRouter();
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  // const [isGooglePending, startGoogleTransition] = useTransition(); // Removed for Google Sign-In
-  const { handleLoginSuccess } = useAuth(); 
+  // const { handleLoginSuccess } = useAuth(); // No se usa handleLoginSuccess aquí
 
   const form = useForm<z.infer<typeof SignUpSchema>>({
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
-      fullName: "",
-      age: '',
-      gender: "",
+      nombreCompleto: "",
+      edad: '', // Se mantiene como string para el input, Zod lo coerciona a número o null
+      genero: "", // Se mantiene como string para el select, Zod lo coerciona a string o null
       email: "",
-      password: "",
+      contrasena: "",
     },
   });
 
@@ -64,21 +63,21 @@ export function SignupForm() {
     startTransition(async () => {
       console.log("SignupForm: Submitting email/password sign-up (client-side)");
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
+        const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.contrasena);
         const firebaseUser = userCredential.user;
 
-        // Instead of calling ensureUserDocument from AuthContext, we directly set the doc here
-        // as per the original PRD's intent for email signup flow.
-        // The AuthContext will handle profile creation on first login if needed via onAuthStateChanged logic.
+        // Crear el documento de perfil en Firestore
+        // AuthContext también intentará crear un perfil si no existe al detectar el usuario,
+        // pero es bueno crearlo aquí explícitamente con los datos del formulario.
         await setDoc(doc(db, "users", firebaseUser.uid), {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
-          fullName: values.fullName,
-          age: values.age === '' || values.age === undefined ? null : Number(values.age),
-          gender: values.gender === '' || values.gender === undefined ? null : values.gender,
+          fullName: values.nombreCompleto,
+          age: values.edad, // Zod ya lo transformó a número o null
+          gender: values.genero, // Zod ya lo transformó a string o null
           createdAt: serverTimestamp(),
           practiceTime: 15, // Default practice time
-          authProvider: "email",
+          authProvider: "password", // 'password' para email/contraseña
         });
         
         console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore.");
@@ -87,9 +86,9 @@ export function SignupForm() {
           title: "Registro Exitoso",
           description: "¡Cuenta creada! Procede a configurar tu tiempo de práctica.",
         });
-        // No longer call handleLoginSuccess here for email signup,
-        // navigation to practice-time is the defined flow.
-        // AuthContext will pick up user on next login via onAuthStateChanged.
+        // No se llama a handleLoginSuccess aquí.
+        // onAuthStateChanged en AuthContext detectará el nuevo usuario.
+        // Redirigir a practice-time como antes.
         router.replace(`/practice-time?userId=${firebaseUser.uid}`); 
       } catch (error: any) {
         console.error("SignupForm: Client-side createUserWithEmailAndPassword failed", error);
@@ -104,6 +103,8 @@ export function SignupForm() {
            errorMessage = "Error de registro debido a un error de red. Por favor, revisa tu conexión a internet.";
         } else if (error.code === 'auth/configuration-not-found') {
             errorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
+        } else if (error.code === 'permission-denied') {
+            errorMessage = `Error de registro: PERMISOS DENEGADOS al intentar crear el perfil en Firestore. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow create: if request.auth.uid == userId;' en la ruta '/users/{userId}'. (Código: ${error.code})`;
         } else if (error.message) {
           errorMessage = `Error al registrarse: ${error.message} (Código: ${error.code})`;
         }
@@ -111,12 +112,11 @@ export function SignupForm() {
           title: "Fallo en el Registro",
           description: errorMessage,
           variant: "destructive",
+          duration: 9000,
         });
       }
     });
   }
-
-  // Google Sign Up handler removed as per decision to remove Google Sign-In
 
   return (
     <Card className="w-full max-w-md shadow-xl">
@@ -131,7 +131,7 @@ export function SignupForm() {
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="fullName"
+              name="nombreCompleto"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Nombre Completo</FormLabel>
@@ -145,7 +145,7 @@ export function SignupForm() {
             <div className="grid grid-cols-2 gap-4">
             <FormField
               control={form.control}
-              name="age"
+              name="edad"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Edad</FormLabel>
@@ -154,8 +154,9 @@ export function SignupForm() {
                       type="number"
                       placeholder="25"
                       {...field}
-                      onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                      value={field.value === undefined || field.value === null ? '' : field.value}
+                      // El valor se maneja como string para el input, Zod lo coerciona
+                      onChange={e => field.onChange(e.target.value === '' ? '' : e.target.value)}
+                      value={field.value === undefined || field.value === null ? '' : String(field.value)}
                     />
                   </FormControl>
                   <FormMessage />
@@ -164,11 +165,14 @@ export function SignupForm() {
             />
             <FormField
               control={form.control}
-              name="gender"
+              name="genero"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Género</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value || ""}>
+                  <Select 
+                    onValueChange={field.onChange} 
+                    value={field.value === null ? "" : field.value || ""}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Selecciona tu género" />
@@ -201,7 +205,7 @@ export function SignupForm() {
             />
             <FormField
               control={form.control}
-              name="password"
+              name="contrasena"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Contraseña</FormLabel>
@@ -212,14 +216,12 @@ export function SignupForm() {
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isPending /*|| isGooglePending*/ }>
+            <Button type="submit" className="w-full" disabled={isPending}>
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Crear Cuenta
             </Button>
           </form>
         </Form>
-
-        {/* Google Sign Up UI Removed */}
 
         <p className="mt-6 text-center text-sm">
           ¿Ya tienes una cuenta?{" "}
@@ -231,3 +233,5 @@ export function SignupForm() {
     </Card>
   );
 }
+
+    

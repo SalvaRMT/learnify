@@ -25,18 +25,26 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { updateUserProfile, signOutUser } from "@/lib/actions"; // signOutUser was added back
+import { updateUserProfile, signOutUser } from "@/lib/actions"; 
 import { useAuth } from "@/context/AuthContext";
-import { Loader2, AlertCircle } from "lucide-react"; // Added AlertCircle
+import { Loader2, AlertCircle } from "lucide-react"; 
 import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
+// Esquema para la actualización, todos los campos son opcionales
+// pero si se proporcionan, deben cumplir con las validaciones.
 const ProfileUpdateSchema = z.object({
-  fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres.").optional(),
-  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? undefined : Number(val)),
-  gender: z.string().min(1, "Por favor selecciona un género.").optional().or(z.literal('')),
+  fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres.").optional().or(z.literal('')),
+  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").nullable().optional().or(z.literal('')),
+  gender: z.string().min(1, "Por favor selecciona un género.").nullable().optional().or(z.literal('')),
   practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos.").optional(),
-});
+}).transform(data => ({
+  ...data,
+  fullName: data.fullName === '' ? undefined : data.fullName, // Convertir string vacío a undefined para que no se envíe
+  age: data.age === '' ? null : (data.age === undefined ? undefined : Number(data.age)), // ' ' a null, undefined se mantiene
+  gender: data.gender === '' ? null : (data.gender === undefined ? undefined : data.gender), // ' ' a null, undefined se mantiene
+}));
+
 
 const practiceTimeOptions = [
   { label: "5 minutos", value: 5 },
@@ -47,7 +55,7 @@ const practiceTimeOptions = [
 ];
 
 export function ProfileForm() {
-  const { user, userProfile, loading: authLoading, fetchUserAppData, handleLoginSuccess: internalHandleLoginSuccess } = useAuth();
+  const { user, userProfile, loading: authLoading, fetchUserAppData, handleLoginSuccess } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [isUpdating, startUpdateTransition] = useTransition();
@@ -57,34 +65,35 @@ export function ProfileForm() {
     resolver: zodResolver(ProfileUpdateSchema),
     defaultValues: {
       fullName: "",
-      age: '',
-      gender: "",
+      age: '', // Usar '' para el input, Zod lo manejará
+      gender: "", // Usar '' para el select, Zod lo manejará
       practiceTime: 15,
     },
   });
 
   useEffect(() => {
-    console.log(`ProfileForm useEffect [user, userProfile, authLoading, form.reset]: User: ${!!user}, UserProfile: ${!!userProfile}, AuthLoading: ${authLoading}`);
-    if (!authLoading && user) { // Auth context has loaded, and there is a Firebase user
+    console.log(`%cProfileForm useEffect [user, userProfile, authLoading, form.reset]: User: ${!!user}, UserProfile: ${!!userProfile}, AuthLoading: ${authLoading}`, "color: violet;");
+    if (!authLoading && user) { 
       if (userProfile) {
-        console.log("ProfileForm: Auth not loading, user and profile exist. Resetting form with profile data:", userProfile);
+        console.log("%cProfileForm: Auth not loading, user and profile exist. Resetting form with profile data:", "color: violet;", userProfile);
         form.reset({
           fullName: userProfile.fullName || "",
-          age: userProfile.age === undefined || userProfile.age === null ? '' : Number(userProfile.age),
-          gender: userProfile.gender || "",
+          // Asegurarse de que age y gender sean strings vacíos para el form.reset si son null/undefined en el perfil
+          age: userProfile.age === undefined || userProfile.age === null ? '' : String(userProfile.age),
+          gender: userProfile.gender === undefined || userProfile.gender === null ? "" : userProfile.gender,
           practiceTime: userProfile.practiceTime || 15,
         });
       } else {
-        console.log("ProfileForm: Auth not loading, user exists, but NO userProfile from context. Resetting form to defaults.");
-        form.reset({ // User is loaded, but no profile (either doesn't exist or failed to load)
-          fullName: "",
+        console.log("%cProfileForm: Auth not loading, user exists, but NO userProfile from context. Resetting form to defaults (likely profile read permission issue or profile does not exist).", "color: orange;");
+        form.reset({ 
+          fullName: user?.displayName || "", // Fallback al displayName de Firebase Auth si no hay perfil
           age: '',
           gender: "",
           practiceTime: 15,
         });
       }
-    } else if (!authLoading && !user) { // Auth context loaded, no user
-        console.log("ProfileForm: Auth not loading and no user. Resetting form to defaults (user logged out).");
+    } else if (!authLoading && !user) { 
+        console.log("%cProfileForm: Auth not loading and no user. Resetting form to defaults (user logged out).", "color: orange;");
         form.reset({
             fullName: "",
             age: '',
@@ -93,53 +102,43 @@ export function ProfileForm() {
         });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, userProfile, authLoading, form.reset]);
+  }, [user, userProfile, authLoading, form.reset]); // form.reset se incluye como dependencia
 
 
-  function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
+  async function onSubmit(values: z.infer<typeof ProfileUpdateSchema>) {
     if (!user) return;
     
-    const finalValues: { [key: string]: any } = {};
-    // Only include fields that have actually changed from the current profile or are being set for the first time
-    if (values.fullName !== undefined && values.fullName !== (userProfile?.fullName || "")) {
-      finalValues.fullName = values.fullName;
-    }
-    
-    const ageFromForm = values.age === '' || values.age === undefined ? undefined : Number(values.age);
-    const ageFromProfile = userProfile?.age === undefined || userProfile?.age === null || userProfile?.age === '' ? undefined : Number(userProfile.age);
-    if (ageFromForm !== ageFromProfile) {
-       finalValues.age = ageFromForm === undefined ? null : ageFromForm; 
-    }
+    // `values` ya viene transformado por Zod.
+    // Los campos que son `undefined` no se incluirán en dataToUpdate.
+    const dataToUpdate: Partial<UserProfile> = {};
 
-    const genderFromForm = values.gender === "" || values.gender === undefined ? undefined : values.gender;
-    const genderFromProfile = userProfile?.gender === "" || userProfile?.gender === undefined || userProfile?.gender === null ? undefined : userProfile.gender;
-    if (genderFromForm !== genderFromProfile) {
-      finalValues.gender = genderFromForm === undefined ? null : genderFromForm;
-    }
+    if (values.fullName !== undefined) dataToUpdate.fullName = values.fullName;
+    if (values.age !== undefined) dataToUpdate.age = values.age; // puede ser null o número
+    if (values.gender !== undefined) dataToUpdate.gender = values.gender; // puede ser null o string
+    if (values.practiceTime !== undefined) dataToUpdate.practiceTime = values.practiceTime;
 
-    if (values.practiceTime !== undefined && values.practiceTime !== (userProfile?.practiceTime || 15)) {
-      finalValues.practiceTime = values.practiceTime;
-    }
 
-    if (Object.keys(finalValues).length === 0) {
+    if (Object.keys(dataToUpdate).length === 0) {
       toast({ title: "Sin Cambios", description: "No se detectaron cambios para actualizar." });
       return;
     }
 
     startUpdateTransition(async () => {
-      console.log("ProfileForm onSubmit: Updating profile with values:", finalValues);
-      const result = await updateUserProfile(user.uid, finalValues);
+      console.log("ProfileForm onSubmit: Updating profile with values:", dataToUpdate);
+      const result = await updateUserProfile(user.uid, dataToUpdate);
       if (result.error) {
         toast({ 
             title: "Fallo al Actualizar", 
-            description: result.error, // This will now show the detailed error from actions.ts
+            description: result.error, 
             variant: "destructive",
             duration: 9000, 
         });
       } else {
         toast({ title: "Perfil Actualizado", description: result.success });
-        if(user.uid && fetchUserAppData) { 
-            await fetchUserAppData(user.uid); // Refresh context data including profile
+        // El AuthContext debería recargar los datos del usuario automáticamente si la actualización fue exitosa
+        // o podemos forzar un refresh si es necesario, pero primero veamos si es automático
+        if (user.uid && refreshUserAppData) { // refreshUserAppData fue renombrado
+            await refreshUserAppData(); 
         }
       }
     });
@@ -147,28 +146,28 @@ export function ProfileForm() {
 
   const handleSignOut = () => {
     startSignOutTransition(async () => {
-      const result = await signOutUser(); // Assuming signOutUser is correctly imported
+      const result = await signOutUser(); 
       if (result.error) {
         toast({ title: "Fallo al Cerrar Sesión", description: result.error, variant: "destructive" });
       } else {
         toast({ title: "Sesión Cerrada", description: "Has cerrado sesión correctamente." });
-        router.push("/login"); 
+        // AuthContext manejará la limpieza del estado, y los layouts/páginas redirigirán.
+        // router.push("/login"); // No es estrictamente necesario aquí, AuthContext debería manejarlo.
       }
     });
   };
   
-  // Show main loading spinner if AuthContext is still loading and we have a user (implies fetching initial data)
   if (authLoading && user) { 
       return (
-          <div className="flex justify-center items-center py-10">
+          <div className="flex flex-col justify-center items-center py-10 text-center">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              <p className="ml-3">Cargando perfil...</p>
+              <p className="ml-3 mt-2">Cargando perfil...</p>
           </div>
       );
   }
 
   if (!user && !authLoading) { 
-    return <p className="text-center text-muted-foreground">Por favor, inicia sesión para ver tu perfil.</p>;
+    return <p className="text-center text-muted-foreground py-10">Por favor, inicia sesión para ver tu perfil.</p>;
   }
   
   return (
@@ -176,18 +175,21 @@ export function ProfileForm() {
       <CardHeader>
         <CardTitle className="text-3xl font-bold text-primary">Tu Perfil</CardTitle>
         <CardDescription>
-          Gestiona la configuración y preferencias de tu cuenta. Tu correo: {user?.email} {user?.emailVerified ? "(Verificado)" : "(No Verificado)"}
+          Gestiona la configuración y preferencias de tu cuenta. <br />
+          Correo: {user?.email} {user?.emailVerified ? <span className="text-green-600">(Verificado)</span> : <span className="text-yellow-600">(No Verificado)</span>}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {!authLoading && user && !userProfile && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive" className="mb-6">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error al Cargar Perfil</AlertTitle>
             <AlertDescription>
-              No se pudo cargar tu perfil desde la base de datos. Esto puede deberse a un problema de permisos de Firestore
-              (asegúrate de que la regla 'allow read: if request.auth.uid == userId;' esté activa para '/users/{"{userId}"}')
-              o que el perfil aún no ha sido creado.
+              No se pudo cargar tu perfil desde la base de datos. Esto puede ocurrir si el perfil no existe
+              o debido a un problema de permisos de Firestore.
+              Si es un usuario nuevo, algunos campos podrían aparecer vacíos hasta que los guardes por primera vez.
+              Asegúrate de que tus reglas de seguridad de Firestore permitan leer 
+              <code>{` /users/${user.uid} `}</code> (ej: <code>allow read: if request.auth.uid == userId;</code>).
             </AlertDescription>
           </Alert>
         )}
@@ -217,7 +219,7 @@ export function ProfileForm() {
                         placeholder="Tu edad" 
                         {...field} 
                         onChange={e => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                        value={field.value === undefined || field.value === null ? '' : field.value}
+                        value={field.value === undefined || field.value === null ? '' : String(field.value)}
                       />
                     </FormControl>
                     <FormMessage />
@@ -230,7 +232,10 @@ export function ProfileForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Género</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      value={field.value === null ? "" : field.value || ""}
+                    >
                       <FormControl><SelectTrigger><SelectValue placeholder="Selecciona tu género" /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="male">Masculino</SelectItem>
@@ -275,9 +280,13 @@ export function ProfileForm() {
               </Button>
             </div>
              {user && !user.emailVerified && ( 
-                <p className="text-sm text-yellow-600 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                    Tu correo electrónico no está verificado. Por favor, revisa tu bandeja de entrada por un enlace de verificación. Algunas funcionalidades podrían estar limitadas.
-                </p>
+                <Alert variant="default" className="mt-4 bg-yellow-50 border-yellow-200 text-yellow-700 [&>svg]:text-yellow-700">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Correo no Verificado</AlertTitle>
+                    <AlertDescription>
+                        Tu correo electrónico no está verificado. Por favor, revisa tu bandeja de entrada por un enlace de verificación. Algunas funcionalidades podrían estar limitadas.
+                    </AlertDescription>
+                </Alert>
             )}
           </form>
         </Form>
