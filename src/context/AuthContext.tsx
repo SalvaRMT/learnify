@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import { auth } from '@/lib/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getUserProfile, getStudyStreakData } from "@/lib/actions";
-import type { UserProfile, StreakData } from "@/types"; // Asegúrate de que la ruta sea correcta
+import type { UserProfile, StreakData } from "@/types";
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -34,13 +34,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.warn("%cAuthContext: fetchUserAppDataCallback called with no UID. Clearing user data.", "color: yellow;");
       setUserProfile(null);
       setStreakData(null);
-      // No cambiar 'loading' aquí, ya que onAuthStateChanged lo manejará.
       return;
     }
     
-    // No establecemos setLoading(true) aquí para evitar parpadeos si ya se está cargando desde onAuthStateChanged
     try {
-      const [profileResult, fetchedStreakData] = await Promise.all([
+      const [profileResult, fetchedStreakDataResult] = await Promise.all([
         getUserProfile(uid),
         getStudyStreakData(uid)
       ]);
@@ -56,8 +54,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // VE A TU CONSOLA DE FIREBASE -> Firestore Database -> Rules
           // Y ASEGÚRATE DE TENER: match /users/{userId} { allow read: if request.auth.uid == userId; }
           console.error(
-            `%cALERTA CRÍTICA DE PERMISOS DE FIRESTORE: La aplicación NO PUEDE LEER el perfil para el usuario ${uid} debido a REGLAS DE SEGURIDAD incorrectas en Firestore. ` +
-            `Por favor, ve a tu Consola de Firebase -> Firestore Database -> Pestaña 'Rules' y asegúrate de que la regla para leer documentos en '/users/{userId}' sea: ` +
+            `%cALERTA CRÍTICA DE PERMISOS DE FIRESTORE: La aplicación NO PUEDE LEER el perfil para el usuario ${uid} porque tus REGLAS DE SEGURIDAD de Firestore son INCORRECTAS. ` +
+            `POR FAVOR, ve a tu Consola de Firebase -> Firestore Database -> Pestaña 'Rules' y asegúrate de que la regla para leer documentos en '/users/{userId}' sea EXACTAMENTE: ` +
             `'allow read: if request.auth.uid == userId;'`,
             "background: red; color: white; font-size: 16px; font-weight: bold; padding: 8px; border: 2px solid darkred;"
           );
@@ -65,23 +63,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUserProfile(null); // Asegura que userProfile es null si no se pudo cargar.
       }
       
-      setStreakData(fetchedStreakData);
-      console.log(`%cAuthContext: Streak data fetched for ${uid}:`, "color: blue;", fetchedStreakData);
+      setStreakData(fetchedStreakDataResult); // Usa el resultado directamente
+      console.log(`%cAuthContext: Streak data fetched for ${uid}:`, "color: blue;", fetchedStreakDataResult);
 
     } catch (error) {
       console.error(`%cAuthContext: Error in fetchUserAppDataCallback for ${uid}:`, "color: red;", error);
       setUserProfile(null);
       setStreakData(null);
-    } finally {
-      // setLoading(false) no se establece aquí directamente; onAuthStateChanged lo manejará
-      // para el flujo de carga inicial global.
     }
   }, []);
 
   const refreshUserAppDataCallback = useCallback(async () => {
     if (user) {
       console.log(`%cAuthContext: refreshUserAppDataCallback called for UID: ${user.uid}`, "color: purple;");
-      setLoading(true); // Indicar que estamos recargando
+      setLoading(true); 
       try {
         await fetchUserAppDataCallback(user.uid);
       } finally {
@@ -95,9 +90,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
     console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}`, "color: green; font-weight: bold;");
     setLoading(true); 
-    setUser(firebaseUser); // Establece el usuario inmediatamente
+    setUser(firebaseUser); 
     try {
-      await fetchUserAppDataCallback(firebaseUser.uid); // Carga sus datos
+      await fetchUserAppDataCallback(firebaseUser.uid); 
     } finally {
       setLoading(false);
       console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now false.`, "color: green; font-weight: bold;");
@@ -110,10 +105,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser); 
-        // No establecemos setLoading(true) aquí si ya está en true por la inicialización.
-        // Si setLoading ya es false, significa que este es un cambio posterior (ej. login/logout después de carga inicial)
-        // Para el login desde LoginForm, handleLoginSuccessCallback maneja el loading.
-        // Para la carga inicial, el loading global ya está en true.
+        setLoading(true); // Set loading to true while fetching app data
         try {
           await fetchUserAppDataCallback(firebaseUser.uid);
         } finally {
@@ -134,7 +126,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchUserAppDataCallback]); // fetchUserAppDataCallback ahora está memoizada
+  }, [fetchUserAppDataCallback]);
 
 
   return (
