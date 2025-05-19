@@ -42,4 +42,6 @@ if (typeof window !== 'undefined') {
 }
 
 // Exporting renamed instances to avoid potential naming conflicts with firebase module itself in some contexts
-export { app, authInstance as auth, dbInstance as db, analyticsInstance as analytics };
+// Also exporting firebaseConfig for use in diagnostics or other parts of the app if needed.
+export { app, authInstance as auth, dbInstance as db, analyticsInstance as analytics, firebaseConfig };
+

@@ -3,7 +3,7 @@
 
 import type { User as FirebaseUser } from "firebase/auth";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { auth, db } from '@/lib/firebaseConfig'; // Asegúrate de importar db
+import { auth, db, firebaseConfig } from '@/lib/firebaseConfig'; // Import firebaseConfig
 import { onAuthStateChanged } from 'firebase/auth';
 import { getUserProfile, getStudyStreakData } from "@/lib/actions";
 import type { UserProfile, StreakData } from "@/types";
@@ -37,9 +37,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     
-    // setLoading(true) no es necesario aquí si onAuthStateChanged ya lo maneja
-    // o si es llamado por handleLoginSuccess que también maneja loading.
-
     try {
       const [profileResult, fetchedStreakDataResult] = await Promise.all([
         getUserProfile(uid),
@@ -59,10 +56,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // Y ASEGÚRATE DE TENER: match /users/{userId} { allow read: if request.auth.uid == userId; }
           // =========================================================================================
           const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-          // Obtener el projectId de la configuración hardcodeada en firebaseConfig.ts como fallback.
-          // Esto asume que firebaseConfig.ts exporta un objeto llamado firebaseConfig con el projectId.
-          // Si no, se debe ajustar o poner directamente "learnify-207f4".
-          const projectIdFromConfigHardcoded = "learnify-207f4"; // Reemplaza con tu projectId real si es diferente y no usas env var.
+          const projectIdFromConfigHardcoded = firebaseConfig.projectId; // Ahora firebaseConfig está importado
           const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO (¡CONFIGURAR projectId!)";
 
           console.error(
@@ -83,7 +77,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             "background: red; color: white; font-size: 16px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
           );
         }
-        setUserProfile(null); // Si hay error, el perfil es null
+        setUserProfile(null); 
       }
       
       setStreakData(fetchedStreakDataResult);
@@ -131,13 +125,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser); 
-        setLoading(true); // Indicar carga mientras se obtienen datos adicionales
-        try {
-          await fetchUserAppDataCallback(firebaseUser.uid);
-        } finally {
-          setLoading(false); 
-          console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
+        if(!userProfile || userProfile.uid !== firebaseUser.uid) { // Fetch only if profile isn't loaded or belongs to a different user
+            setLoading(true); 
+            try {
+                await fetchUserAppDataCallback(firebaseUser.uid);
+            } finally {
+                setLoading(false); 
+            }
+        } else {
+            setLoading(false); // Already have profile for this user or initial load done
         }
+        console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
         setUser(null);
         setUserProfile(null);
@@ -177,9 +175,4 @@ export const useAuth = () => {
   return context;
 };
 
-// No es necesario importar firebaseConfig de lib/firebaseConfig aquí para el projectId del log,
-// ya que NEXT_PUBLIC_FIREBASE_PROJECT_ID debería ser la fuente principal si está configurado,
-// o se usa un valor hardcodeado directamente en el string del log como fallback.
-// const localFallbackFirebaseConfig = { // Solo para el log de projectId si process.env no está disponible y lib/firebaseConfig no se importa aquí.
-//   projectId: "learnify-207f4", 
-// };
+    
