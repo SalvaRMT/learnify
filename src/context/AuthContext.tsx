@@ -72,7 +72,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             `     // ... también necesitarás 'allow create', 'allow update' para otras operaciones ...\n` +
             `   }\n` +
             `4. ¡HAZ CLIC EN "PUBLICAR" DESPUÉS DE CAMBIAR LAS REGLAS!\n` +
-            `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n\n` +
+            `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n\n`+
             `**ESTE PROBLEMA NO SE PUEDE ARREGLAR CAMBIANDO EL CÓDIGO DE LA APLICACIÓN. La corrección está en la configuración de Firebase.**\n\n`+
             `Error original de Firestore reportado por la acción getUserProfile: "${profileResult.error}"\n\n`,
             "background: red; color: white; font-size: 16px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
@@ -126,12 +126,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser); 
-        if (!loading) setLoading(true); 
+        // setLoading(true) is handled by fetchUserAppDataCallback if needed, or by initial state.
+        // The main setLoading(true) for initial load is outside this if/else.
+        // We ensure loading is true before any async data fetching starts based on new auth state.
+        if (!loading && !userProfile) { // If we weren't loading but now have a user and no profile, start loading sequence
+            setLoading(true);
+        }
         try {
             await fetchUserAppDataCallback(firebaseUser.uid);
         } finally {
-            setLoading(false); 
-             console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
+            // setLoading(false) will be called inside fetchUserAppDataCallback's finally block
+            // or if already false and no user, it stays false.
+            // This ensures loading is only false after all data fetching related to this auth change is done.
+            console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading state will be managed by fetchUserAppDataCallback.`, "color: teal;");
         }
       } else {
         setUser(null);
@@ -142,12 +149,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     });
 
+    // Set loading to false after initial check if no user was found and not already loading
+    // This handles the case where the app loads and the user is already logged out.
+    if (!user && loading) {
+      setLoading(false);
+      console.log("%cAuthContext useEffect[onAuthStateChanged]: Initial auth check complete, no user, setting loading to false.", "color: magenta;");
+    }
+
+
     return () => {
       console.log("%cAuthContext useEffect[onAuthStateChanged]: Unsubscribing.", "color: magenta;");
       unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchUserAppDataCallback]); 
+  }, [fetchUserAppDataCallback]); // Dependencies: only fetchUserAppDataCallback is stable. user/loading/userProfile are managed internally.
 
   return (
     <AuthContext.Provider value={{ 
