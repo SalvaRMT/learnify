@@ -7,7 +7,7 @@ import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebaseConfig";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
@@ -30,33 +30,24 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ensureGoogleUserInFirestore } from "@/lib/actions";
+// ensureGoogleUserInFirestore import was removed as Google Sign-In functionality was removed.
 import { Loader2 } from "lucide-react";
-import { useAuth } from "@/context/AuthContext"; // Import useAuth
+import { useAuth } from "@/context/AuthContext"; 
 
 const SignUpSchema = z.object({
-  fullName: z.string().min(2, "Full name must be at least 2 characters."),
-  age: z.coerce.number().min(5, "Age must be at least 5.").max(120, "Age must be at most 120.").optional().or(z.literal('')),
-  gender: z.string().min(1, "Please select a gender.").optional(),
-  email: z.string().email("Invalid email address."),
-  password: z.string().min(6, "Password must be at least 6 characters."),
+  fullName: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres."),
+  age: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? undefined : Number(val)),
+  gender: z.string().min(1, "Por favor selecciona un género.").optional().or(z.literal('')),
+  email: z.string().email("Dirección de correo electrónico inválida."),
+  password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres."),
 });
-
-const GoogleIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20px" height="20px">
-    <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
-    <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
-    <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
-    <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l0.012-0.012l6.19,5.238C39.302,34.373,44,28.728,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
-  </svg>
-);
 
 export function SignupForm() {
   const router = useRouter();
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const [isGooglePending, startGoogleTransition] = useTransition();
-  const { handleLoginSuccess } = useAuth(); // Get handleLoginSuccess from context
+  // const [isGooglePending, startGoogleTransition] = useTransition(); // Removed for Google Sign-In
+  const { handleLoginSuccess } = useAuth(); 
 
   const form = useForm<z.infer<typeof SignUpSchema>>({
     resolver: zodResolver(SignUpSchema),
@@ -76,43 +67,48 @@ export function SignupForm() {
         const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
         const firebaseUser = userCredential.user;
 
+        // Instead of calling ensureUserDocument from AuthContext, we directly set the doc here
+        // as per the original PRD's intent for email signup flow.
+        // The AuthContext will handle profile creation on first login if needed via onAuthStateChanged logic.
         await setDoc(doc(db, "users", firebaseUser.uid), {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           fullName: values.fullName,
-          age: values.age === '' ? undefined : Number(values.age),
-          gender: values.gender || undefined,
+          age: values.age === '' || values.age === undefined ? null : Number(values.age),
+          gender: values.gender === '' || values.gender === undefined ? null : values.gender,
           createdAt: serverTimestamp(),
+          practiceTime: 15, // Default practice time
           authProvider: "email",
         });
         
         console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore.");
         
-        // For email signup, we still want to go to practice-time, not directly update AuthContext with handleLoginSuccess yet.
-        // AuthContext will pick up the user via onAuthStateChanged when they eventually log in.
         toast({
-          title: "Sign Up Successful",
-          description: "Account created! Proceed to set practice time.",
+          title: "Registro Exitoso",
+          description: "¡Cuenta creada! Procede a configurar tu tiempo de práctica.",
         });
+        // No longer call handleLoginSuccess here for email signup,
+        // navigation to practice-time is the defined flow.
+        // AuthContext will pick up user on next login via onAuthStateChanged.
         router.replace(`/practice-time?userId=${firebaseUser.uid}`); 
       } catch (error: any) {
         console.error("SignupForm: Client-side createUserWithEmailAndPassword failed", error);
-        let errorMessage = "Failed to create account. Please try again.";
+        let errorMessage = "Error al crear la cuenta. Por favor, inténtalo de nuevo.";
         if (error.code === 'auth/email-already-in-use') {
-          errorMessage = "This email is already in use. Please try a different email or login.";
+          errorMessage = "Este correo electrónico ya está en uso. Por favor, intenta con otro correo o inicia sesión.";
         } else if (error.code === 'auth/weak-password') {
-          errorMessage = "The password is too weak. Please choose a stronger password.";
+          errorMessage = "La contraseña es muy débil. Por favor, elige una contraseña más fuerte.";
         } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-supported-in-this-environment') {
-            errorMessage = `Sign-up error: This sign-up method isn't allowed for your current setup or domain. Please check Firebase console settings for authorized domains and enabled providers. (Code: ${error.code})`;
+            errorMessage = `Error de registro: Este método de registro no está permitido para tu configuración o dominio actual. Revisa la configuración de la consola de Firebase para dominios autorizados y proveedores habilitados. (Código: ${error.code})`;
         } else if (error.code === 'auth/network-request-failed') {
-           errorMessage = "Sign up failed due to a network error. Please check your internet connection.";
+           errorMessage = "Error de registro debido a un error de red. Por favor, revisa tu conexión a internet.";
         } else if (error.code === 'auth/configuration-not-found') {
-            errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication is enabled and configured in the Firebase console. (Code: ${error.code})`;
+            errorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
         } else if (error.message) {
-          errorMessage = `Sign up failed: ${error.message} (Code: ${error.code})`;
+          errorMessage = `Error al registrarse: ${error.message} (Código: ${error.code})`;
         }
         toast({
-          title: "Sign Up Failed",
+          title: "Fallo en el Registro",
           description: errorMessage,
           variant: "destructive",
         });
@@ -120,67 +116,14 @@ export function SignupForm() {
     });
   }
 
-  const handleGoogleSignUp = () => {
-    startGoogleTransition(async () => {
-      console.log("SignupForm: Attempting Google Sign-Up (client-side popup)");
-      const provider = new GoogleAuthProvider();
-      try {
-        const userCredential: UserCredential = await signInWithPopup(auth, provider);
-        const firebaseUser = userCredential.user;
-        console.log("SignupForm: Google Sign-Up with popup successful, user UID:", firebaseUser.uid);
-
-        const ensureResult = await ensureGoogleUserInFirestore({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          displayName: firebaseUser.displayName,
-        });
-
-        if (ensureResult.error) {
-            toast({ title: "Google Sign-Up Error", description: ensureResult.error, variant: "destructive" });
-            return;
-        }
-
-        await handleLoginSuccess(firebaseUser); // Proactively update AuthContext
-
-        toast({
-          title: "Google Sign-Up Successful",
-          description: "Account created with Google! Redirecting to dashboard...",
-        });
-        router.replace('/dashboard'); // Navigate AFTER context update attempt
-
-      } catch (error: any) {     
-        console.error("SignupForm: Google Sign-Up failed", error);   
-        let errorMessage = "Google Sign-Up failed. Please try again.";
-         if (error.code === 'auth/popup-closed-by-user') {
-          errorMessage = "Sign-up popup closed. Please try again.";
-        } else if (error.code === 'auth/account-exists-with-different-credential') {
-          errorMessage = "An account already exists with this email using a different sign-in method.";
-        } else if (error.code === 'auth/operation-not-supported-in-this-environment' || error.code === 'auth/unauthorized-domain') {
-            errorMessage = `Google Sign-Up error: This domain is not authorized for OAuth operations. Please add your domain (e.g., localhost) to the 'Authorized domains' list in your Firebase console (Authentication -> Settings) and ensure it's also in your Google Cloud OAuth client's 'Authorized JavaScript origins'. (Code: ${error.code})`;
-        } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-blocked') {
-            errorMessage = "Google Sign-Up popup was blocked or cancelled. Please ensure popups are enabled and try again.";
-        } else if (error.code === 'auth/network-request-failed') {
-            errorMessage = "Google Sign-Up failed due to a network error. Please check your internet connection.";
-        } else if (error.code === 'auth/configuration-not-found') {
-          errorMessage = `Firebase Authentication configuration not found for this project. Please ensure Authentication and Google Sign-in are enabled and configured in the Firebase console. (Code: ${error.code})`;
-        } else if (error.message) {
-          errorMessage = `Google Sign-Up error: ${error.message} (Code: ${error.code})`;
-        }
-        toast({
-          title: "Google Sign-Up Failed",
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
-    });
-  };
+  // Google Sign Up handler removed as per decision to remove Google Sign-In
 
   return (
     <Card className="w-full max-w-md shadow-xl">
       <CardHeader>
-        <CardTitle className="text-3xl font-bold text-center text-primary">Create Account</CardTitle>
+        <CardTitle className="text-3xl font-bold text-center text-primary">Crear Cuenta</CardTitle>
         <CardDescription className="text-center">
-          Join Learnify and start your learning adventure!
+          ¡Únete a Learnify y comienza tu aventura de aprendizaje!
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -191,7 +134,7 @@ export function SignupForm() {
               name="fullName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
+                  <FormLabel>Nombre Completo</FormLabel>
                   <FormControl>
                     <Input placeholder="John Doe" {...field} />
                   </FormControl>
@@ -205,7 +148,7 @@ export function SignupForm() {
               name="age"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Age</FormLabel>
+                  <FormLabel>Edad</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
@@ -224,18 +167,18 @@ export function SignupForm() {
               name="gender"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Gender</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value || ""} value={field.value || ""}>
+                  <FormLabel>Género</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select gender" />
+                        <SelectValue placeholder="Selecciona tu género" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                      <SelectItem value="male">Masculino</SelectItem>
+                      <SelectItem value="female">Femenino</SelectItem>
+                      <SelectItem value="other">Otro</SelectItem>
+                      <SelectItem value="prefer_not_to_say">Prefiero no decirlo</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -248,9 +191,9 @@ export function SignupForm() {
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
+                  <FormLabel>Correo Electrónico</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="you@example.com" {...field} />
+                    <Input type="email" placeholder="tu@ejemplo.com" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -261,7 +204,7 @@ export function SignupForm() {
               name="password"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Password</FormLabel>
+                  <FormLabel>Contraseña</FormLabel>
                   <FormControl>
                     <Input type="password" placeholder="••••••••" {...field} />
                   </FormControl>
@@ -269,37 +212,19 @@ export function SignupForm() {
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isPending || isGooglePending}>
+            <Button type="submit" className="w-full" disabled={isPending /*|| isGooglePending*/ }>
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Account
+              Crear Cuenta
             </Button>
           </form>
         </Form>
 
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">
-              Or continue with
-            </span>
-          </div>
-        </div>
-
-        <Button variant="outline" className="w-full" onClick={handleGoogleSignUp} disabled={isPending || isGooglePending}>
-          {isGooglePending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <GoogleIcon />
-          )}
-          Sign up with Google
-        </Button>
+        {/* Google Sign Up UI Removed */}
 
         <p className="mt-6 text-center text-sm">
-          Already have an account?{" "}
+          ¿Ya tienes una cuenta?{" "}
           <Link href="/login" className="font-medium text-primary hover:underline">
-            Login
+            Inicia Sesión
           </Link>
         </p>
       </CardContent>
