@@ -3,8 +3,9 @@
 
 import { auth, db } from "@/lib/firebaseConfig";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod"; // Asegúrate de que esta importación sea regular
+import { z } from "zod";
 import type { UserProfile, StreakData, Question } from "@/types";
+import { signInWithEmailAndPassword, signOut as firebaseSignOut } from "firebase/auth"; // Importar signOut
 
 // =========================================================================================
 // ¡¡¡ ATENCIÓN DESARROLLADOR: ESTE MENSAJE ES IMPORTANTE !!!
@@ -12,15 +13,15 @@ import type { UserProfile, StreakData, Question } from "@/types";
 // SI VES UN ERROR EN LA CONSOLA DEL NAVEGADOR (PROVENIENTE DE AuthContext.tsx) QUE DICE:
 // "[ALERTA CRÍTICA DE PERMISOS DE FIRESTORE... La aplicación NO PUEDE LEER el perfil...
 //  ...Revisa tus REGLAS DE SEGURIDAD de Firestore... la regla necesaria es
-//  'allow read: if request.auth.uid == userId;' en la ruta '/lusers/{userId}']"
+//  'allow read: if request.auth.uid == userId;' en la ruta '/users/{userId}']"
 //
 // SIGNIFICA QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
 //
 // DEBES IR A TU CONSOLA DE FIREBASE -> Firestore Database -> Rules (Reglas)
-// Y ASEGURARTE DE QUE LA REGLA PARA LA COLECCIÓN 'lusers' (o como se llame tu colección de usuarios)
+// Y ASEGURARTE DE QUE LA REGLA PARA LA COLECCIÓN 'users' (o como se llame tu colección de usuarios)
 // PERMITA LA LECTURA ('read') PARA EL USUARIO AUTENTICADO.
 // EJEMPLO:
-//   match /lusers/{userId} { // Reemplaza 'lusers' si tu colección se llama diferente
+//   match /users/{userId} { // Reemplaza 'users' si tu colección se llama diferente
 //     allow read: if request.auth.uid == userId;
 //     // ... y también 'allow create, update, delete' según necesites ...
 //   }
@@ -28,11 +29,10 @@ import type { UserProfile, StreakData, Question } from "@/types";
 // ESTE CÓDIGO DE LA APLICACIÓN NO PUEDE SOLUCIONAR UN PROBLEMA DE PERMISOS.
 // LA CORRECCIÓN DEBE HACERSE EN TUS REGLAS DE SEGURIDAD EN FIREBASE.
 // =========================================================================================
-
 export async function getUserProfile(userId: string): Promise<{ success: boolean, data?: UserProfile, error?: string }> {
-  console.log(`[getUserProfile Server Action] Attempting to get profile for userId: ${userId} from collection 'lusers'`);
+  console.log(`[getUserProfile Server Action] Attempting to get profile for userId: ${userId} from collection 'users'`);
   try {
-    const userDocRef = doc(db, "lusers", userId);
+    const userDocRef = doc(db, "users", userId);
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -45,9 +45,10 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
         age: data.age === undefined || data.age === null ? '' : Number(data.age),
         gender: data.gender === undefined || data.gender === null ? '' : String(data.gender),
       };
+      console.log(`[getUserProfile Server Action] Profile found for ${userId}:`, profileData);
       return { success: true, data: profileData };
     } else {
-      console.warn(`[getUserProfile Server Action] Perfil de usuario no encontrado en Firestore para UID: ${userId} en colección 'lusers'`);
+      console.warn(`[getUserProfile Server Action] Perfil de usuario no encontrado en Firestore para UID: ${userId} en colección 'users'`);
       return { success: false, error: "Perfil de usuario no encontrado." };
     }
   } catch (error: any) {
@@ -77,7 +78,7 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
   const { practiceTime } = validatedFields.data;
 
   try {
-    const userDocRef = doc(db, "lusers", userId); // CAMBIADO a 'lusers'
+    const userDocRef = doc(db, "users", userId); 
     await updateDoc(userDocRef, { practiceTime });
     return { success: "¡Tiempo de práctica guardado!" };
   } catch (error: any) {
@@ -87,7 +88,7 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       return { 
-        error: `Error al guardar el tiempo de práctica: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore permitan la operación 'update' en el documento '/lusers/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /lusers/{userId} { ... }'. (Código: ${error.code})` 
+        error: `Error al guardar el tiempo de práctica: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore permitan la operación 'update' en el documento '/users/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /users/{userId} { ... }'. (Código: ${error.code})` 
       };
     }
     return { error: `Error al guardar el tiempo de práctica: ${error.message}` };
@@ -116,7 +117,7 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
   dataToUpdate.lastUpdatedAt = serverTimestamp();
 
   try {
-    const userDocRef = doc(db, "lusers", userId); // CAMBIADO a 'lusers'
+    const userDocRef = doc(db, "users", userId); 
     await updateDoc(userDocRef, dataToUpdate);
     return { success: "¡Perfil actualizado correctamente!" };
   } catch (error: any) {
@@ -126,7 +127,7 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       return { 
-        error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/lusers/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' en la ruta 'match /lusers/{userId}'. (Código: ${error.code})`
+        error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/users/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /users/{userId} { ... }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al actualizar el perfil: ${error.message}` };
@@ -163,12 +164,13 @@ export async function getPracticeQuestions(): Promise<Question[]> {
     console.log(`[getPracticeQuestions] Seleccionadas ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore.`);
     return selectedQuestions;
 
-  } catch (error: any) {
+  } catch (error: any)
+{
     console.error("[getPracticeQuestions] Error al obtener preguntas de práctica de Firestore:", error);
     if (error.code === 'unavailable') {
       console.error(`[getPracticeQuestions] Error de Firestore (Código: ${error.code}): ${UNAVAILABLE_ERROR_MESSAGE}`);
     } else if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      console.error("[getPracticeQuestions] PERMISO DENEGADO al leer la colección 'questions'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow read: if request.auth != null;' en la ruta 'match /questions/{questionId}'.");
+      console.error("[getPracticeQuestions] PERMISO DENEGADO al leer la colección 'questions'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow read: if request.auth.uid != null;' en la ruta 'match /questions/{questionId} { ... }'.");
     }
     console.warn("[getPracticeQuestions] Devolviendo preguntas de ejemplo debido a un error.");
     return exampleQuestionsData;
@@ -193,9 +195,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     today.setHours(0, 0, 0, 0); 
     console.log(`[recordPracticeSession] Fecha de hoy (normalizada): ${today.toISOString()}`);
 
-    const streakSummaryRef = doc(db, "lusers", userId, "streaks", "summary"); // CAMBIADO a 'lusers'
+    const streakSummaryRef = doc(db, "users", userId, "streaks", "summary"); 
     const todayDateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const dailyRecordRef = doc(db, "lusers", userId, "dailyProgress", todayDateStr); // CAMBIADO a 'lusers'
+    const dailyRecordRef = doc(db, "users", userId, "dailyProgress", todayDateStr); 
 
     const batch = writeBatch(db);
 
@@ -306,13 +308,13 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const path1 = `/lusers/${userId}/streaks/summary`; // CAMBIADO a 'lusers'
-      const path2 = `/lusers/${userId}/dailyProgress/...`; // CAMBIADO a 'lusers'
+      const path1 = `/users/${userId}/streaks/summary`; 
+      const path2 = `/users/${userId}/dailyProgress/...`; 
       return { 
           error: `Error al registrar la sesión: PERMISOS DENEGADOS. `+
                  `Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ` +
                  `'${path1}' Y '${path2}'. ` +
-                 `Esto se configura dentro de 'match /lusers/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. ` + // CAMBIADO a 'lusers'
+                 `Esto se configura dentro de 'match /users/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. ` + 
                  `(Código: ${error.code})`
         };
     }
@@ -321,26 +323,49 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 }
 
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  console.log(`[getStudyStreakData] Intentando obtener datos de racha para userId: ${userId} desde '/lusers/.../streaks/summary'`); // CAMBIADO a 'lusers'
+  console.log(`[getStudyStreakData] Intentando obtener datos de racha para userId: ${userId} desde '/users/.../streaks/summary'`);
   try {
-    const streakSummaryRef = doc(db, "lusers", userId, "streaks", "summary"); // CAMBIADO a 'lusers'
+    const streakSummaryRef = doc(db, "users", userId, "streaks", "summary");
     const summarySnap = await getDoc(streakSummaryRef);
 
     if (summarySnap.exists()) {
       const data = summarySnap.data();
-      const completedDatesJS = (data.completedDates || []).map((ts: Timestamp) => {
-        const date = ts.toDate();
-        date.setHours(0,0,0,0); 
-        return date;
-      });
-      
+      // Ensure completedDates is an array before mapping, and handle Timestamps
+      const completedDatesArray = Array.isArray(data.completedDates) ? data.completedDates : [];
+      const completedDatesJS = completedDatesArray.map((ts: any) => { // Use any for ts to avoid type errors if data is not strictly Timestamp[]
+        if (ts instanceof Timestamp) {
+          const date = ts.toDate();
+          date.setHours(0, 0, 0, 0);
+          return date;
+        } else if (ts && typeof ts.toDate === 'function') { // Handle cases where it might be a Firestore-like Timestamp object but not an instance
+          const date = ts.toDate();
+          date.setHours(0,0,0,0);
+          return date;
+        } else if (ts instanceof Date) {
+           const date = new Date(ts.getTime());
+           date.setHours(0,0,0,0);
+           return date;
+        } else if (typeof ts === 'string' || typeof ts === 'number') { // Handle string or number timestamps
+            const date = new Date(ts);
+            if (!isNaN(date.getTime())) {
+                date.setHours(0,0,0,0);
+                return date;
+            }
+        }
+        // console.warn(`[getStudyStreakData] Unexpected type in completedDates for user ${userId}:`, ts);
+        return null; // Or handle as an error / skip
+      }).filter(date => date instanceof Date) as Date[]; // Filter out nulls and ensure type
+
       const streakData: StreakData = {
         currentStreak: data.currentStreak || 0,
         longestStreak: data.longestStreak || 0,
         totalQuestionsAnswered: data.totalQuestionsAnswered || 0,
         completedDates: completedDatesJS,
       };
-      console.log(`[getStudyStreakData] Datos de racha encontrados para ${userId}:`, JSON.stringify(streakData));
+      console.log(`[getStudyStreakData] Datos de racha encontrados para ${userId}:`, JSON.stringify({
+        ...streakData,
+        completedDates: streakData.completedDates.map(d => d.toISOString()) // Log as ISO strings for readability
+      }));
       return streakData;
     } else {
       console.log(`[getStudyStreakData] No se encontró resumen de racha para ${userId}. Devolviendo valores por defecto.`);
@@ -354,7 +379,7 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
   } catch (error: any) {
     console.error(`[getStudyStreakData] Error al obtener datos de racha para ${userId}:`, error);
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-        console.error(`[getStudyStreakData] PERMISO DENEGADO al leer '/lusers/${userId}/streaks/summary'. Revisa tus reglas de seguridad.`); // CAMBIADO a 'lusers'
+        console.error(`[getStudyStreakData] PERMISO DENEGADO al leer '/users/${userId}/streaks/summary'. Revisa tus reglas de seguridad.`);
     }
     return {
       currentStreak: 0,
@@ -365,4 +390,12 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
   }
 }
 
-    
+export async function signOutUser() {
+  try {
+    await firebaseSignOut(auth); // Usa la instancia de auth del cliente si es una acción del cliente, o la del admin si es del servidor. Aquí parece ser del servidor.
+    return { success: "Sesión cerrada correctamente." };
+  } catch (error: any) {
+    console.error("Error al cerrar sesión (actions.ts):", error);
+    return { error: `Error al cerrar sesión: ${error.message}` };
+  }
+}

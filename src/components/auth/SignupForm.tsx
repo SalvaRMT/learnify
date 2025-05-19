@@ -31,12 +31,13 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
+// import { ensureGoogleUserInFirestore } from "@/lib/actions"; // Eliminado ya que no hay Google Sign-In
 import { useAuth } from "@/context/AuthContext"; 
 
 const SignUpSchema = z.object({
   nombreCompleto: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres."),
-  edad: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").optional().or(z.literal('')).transform(val => val === '' ? null : Number(val)),
-  genero: z.string().min(1, "Por favor selecciona un género.").optional().or(z.literal('')).transform(val => val === '' ? null : val),
+  edad: z.coerce.number().min(5, "La edad debe ser al menos 5.").max(120, "La edad debe ser como máximo 120.").nullable().optional().or(z.literal('')).transform(val => val === '' ? null : (val === undefined ? undefined : Number(val))),
+  genero: z.string().min(1, "Por favor selecciona un género.").nullable().optional().or(z.literal('')).transform(val => val === '' ? null : (val === undefined ? undefined : val)),
   email: z.string().email("Dirección de correo electrónico inválida."),
   contrasena: z.string().min(6, "La contraseña debe tener al menos 6 caracteres."),
 });
@@ -65,18 +66,18 @@ export function SignupForm() {
         const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.contrasena);
         const firebaseUser = userCredential.user;
 
-        await setDoc(doc(db, "lusers", firebaseUser.uid), { // CAMBIADO a 'lusers'
+        await setDoc(doc(db, "users", firebaseUser.uid), { 
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           fullName: values.nombreCompleto,
-          age: values.edad, 
-          gender: values.genero, 
+          age: values.edad === '' ? null : Number(values.edad), 
+          gender: values.genero === '' ? null : values.genero, 
           createdAt: serverTimestamp(),
           practiceTime: 15, 
           authProvider: "password", 
         });
         
-        console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore in 'lusers'.");
+        console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore in 'users'.");
         
         toast({
           title: "Registro Exitoso",
@@ -97,7 +98,7 @@ export function SignupForm() {
         } else if (error.code === 'auth/configuration-not-found') {
             errorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
         } else if (error.code === 'permission-denied') {
-            errorMessage = `Error de registro: PERMISOS DENEGADOS al intentar crear el perfil en Firestore en la colección '/lusers'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow create: if request.auth.uid == userId;' en la ruta '/lusers/{userId}'. (Código: ${error.code})`;
+            errorMessage = `Error de registro: PERMISOS DENEGADOS al intentar crear el perfil en Firestore en la colección '/users'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow create: if request.auth.uid == userId;' en la ruta '/users/{userId}'. (Código: ${error.code})`;
         } else if (error.message) {
           errorMessage = `Error al registrarse: ${error.message} (Código: ${error.code})`;
         }
@@ -225,5 +226,3 @@ export function SignupForm() {
     </Card>
   );
 }
-
-    

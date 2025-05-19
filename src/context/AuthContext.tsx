@@ -3,7 +3,7 @@
 
 import type { User as FirebaseUser } from "firebase/auth";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { auth, db, firebaseConfig } from '@/lib/firebaseConfig'; // Import firebaseConfig
+import { auth, db, firebaseConfig } from '@/lib/firebaseConfig'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { getStudyStreakData } from "@/lib/actions"; 
@@ -38,10 +38,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     
-    let profileReadError = null;
+    let profileReadError = false;
     try {
-      console.log(`%cAuthContext: Intentando LEER perfil desde Firestore. Ruta: /lusers/${uid}`, "color: blue;"); // CAMBIADO a 'lusers'
-      const userDocRef = doc(db, "lusers", uid); // CAMBIADO a 'lusers'
+      console.log(`%cAuthContext: Intentando LEER perfil desde Firestore. Path: /users/${uid}`, "color: blue;");
+      const userDocRef = doc(db, "users", uid);
       const profileSnap = await getDoc(userDocRef);
 
       if (profileSnap.exists()) {
@@ -58,14 +58,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log(`%cAuthContext: Perfil encontrado para ${uid}:`, "color: blue;", fetchedProfileData);
       } else {
         setUserProfile(null);
-        console.warn(`%cAuthContext: Documento de perfil NO encontrado en Firestore para UID: ${uid} en '/lusers/${uid}'`, "color: orange;"); // CAMBIADO a 'lusers'
+        console.warn(`%cAuthContext: Documento de perfil NO encontrado en Firestore para UID: ${uid} en '/users/${uid}'`, "color: orange;");
       }
     } catch (error: any) {
-      profileReadError = error.message || "Error desconocido al obtener perfil.";
-      console.error(`%cAuthContext: Error al obtener perfil para UID ${uid} directamente en AuthContext. Error: ${profileReadError}`, "color: red;", error);
-      setUserProfile(null);
-
-      if (profileReadError.includes("permission-denied") || profileReadError.includes("permisos")) {
+      profileReadError = true;
+      const errorMessage = error.message || "Error desconocido al obtener perfil.";
+      console.warn(`%cAuthContext: Profile NOT found or error for UID: ${uid}. Error: ${errorMessage}`, "color: red; font-weight: bold;");
+      if (errorMessage.includes("permission-denied") || errorMessage.includes("permisos")) {
+          // =========================================================================================
+          // ESTE MENSAJE DE CONSOLA ES UN DIAGNÓSTICO. INDICA QUE LAS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
+          // LA SOLUCIÓN ES ARREGLAR LAS REGLAS EN LA CONSOLA DE FIREBASE, NO EN ESTE CÓDIGO.
+          // =========================================================================================
           const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
           const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
           const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO (¡CONFIGURAR projectId!)";
@@ -77,25 +80,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             `ACCIÓN REQUERIDA (EN LA CONSOLA DE FIREBASE):\n` +
             `1. Ve a tu proyecto de Firebase: ${finalProjectId}\n` +
             `2. Navega a: Firestore Database -> Pestaña 'Rules'. (URL: https://console.firebase.google.com/project/${finalProjectId}/firestore/rules)\n` +
-            `3. ASEGÚRATE de que la regla para leer documentos en '/lusers/${uid}' sea EXACTAMENTE (copia y pega con cuidado):\n` + // CAMBIADO a 'lusers'
-            `   match /lusers/{userId} {\n` + // CAMBIADO a 'lusers'
+            `3. ASEGÚRATE de que la regla para leer documentos en '/users/{userId}' sea EXACTAMENTE (copia y pega con cuidado):\n` +
+            `   match /users/{userId} {\n` +
             `     allow read: if request.auth.uid == userId;\n` +
             `     // ... también necesitarás 'allow create', 'allow update' para otras operaciones ...\n` +
             `   }\n` +
             `4. ¡HAZ CLIC EN "PUBLICAR" DESPUÉS DE CAMBIAR LAS REGLAS!\n` +
             `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n` +
-            `6. CONSEJO EXTRA: Utiliza el "Simulador de Reglas" en la pestaña 'Rules' de Firestore para probar tus reglas con el UID '${uid}' en la ruta '/lusers/${uid}'.\n\n`+ // CAMBIADO a 'lusers'
-            `**ESTE MENSAJE ES UN DIAGNÓSTICO DE LA APLICACIÓN. LA SOLUCIÓN REQUIERE QUE ACTUALICES TUS REGLAS DE SEGURIDAD EN LA CONSOLA DE FIREBASE.**\n\n`+
-            `Error original de Firestore reportado desde AuthContext: "${profileReadError}"\n\n`,
+            `6. CONSEJO EXTRA: Utiliza el "Simulador de Reglas" en la pestaña 'Rules' de Firestore para probar tus reglas con el UID '${uid}'.\n\n`+
+            `**ESTE MENSAJE ES UN DIAGNÓSTICO DE LA APLICACIÓN. LA SOLUCIÓN REQUIERE QUE ACTUALICES TUS REGLAS DE SEGURIDAD EN LA CONSOLA DE FIREBASE.**\n\n` +
+            `Error original de Firestore reportado directamente desde AuthContext: "${errorMessage}"\n\n`,
             "background: #FFD2D2; color: #D8000C; font-size: 12px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
           );
         }
+      setUserProfile(null);
     }
 
     try {
       const fetchedStreakData = await getStudyStreakData(uid);
       setStreakData(fetchedStreakData);
-      console.log(`%cAuthContext: Datos de racha obtenidos para ${uid}:`, "color: blue;", fetchedStreakData);
+      console.log(`%cAuthContext: Streak data fetched for ${uid}:`, "color: blue;", JSON.stringify({
+        ...fetchedStreakData,
+        completedDates: fetchedStreakData.completedDates.map(d => d.toISOString())
+      }));
     } catch (error) {
       console.error(`%cAuthContext: Error al obtener datos de racha para UID ${uid}:`, "color: red;", error);
       setStreakData(null);
@@ -107,55 +114,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true); 
     setUser(firebaseUser);
     
-    let operationAttempted = "getDoc (verificar perfil post-login)";
-    try {
-      const userDocRef = doc(db, "lusers", firebaseUser.uid); // CAMBIADO a 'lusers'
-      console.log(`%cAuthContext (handleLoginSuccess): Intentando OBTENER perfil. Ruta: /lusers/${firebaseUser.uid}`, "color: blue;"); // CAMBIADO a 'lusers'
-      const docSnap = await getDoc(userDocRef);
-      if (!docSnap.exists()) {
-        operationAttempted = `setDoc (crear perfil post-login) en /lusers/${firebaseUser.uid}`; // CAMBIADO a 'lusers'
-        console.log(`%cAuthContext (handleLoginSuccess): Perfil NO encontrado para UID: ${firebaseUser.uid}. Creando nuevo perfil...`, "color: orange; font-weight: bold;");
-        await setDoc(userDocRef, {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          fullName: firebaseUser.displayName || firebaseUser.email || "",
-          createdAt: serverTimestamp(),
-          practiceTime: 15,
-          age: null,
-          gender: null,
-          authProvider: firebaseUser.providerData?.[0]?.providerId || "password",
-        });
-        console.log(`%cAuthContext (handleLoginSuccess): Perfil CREADO para UID: ${firebaseUser.uid} en '/lusers'`, "color: green; font-weight: bold;"); // CAMBIADO a 'lusers'
-      } else {
-        console.log(`%cAuthContext (handleLoginSuccess): Perfil ya existe para UID: ${firebaseUser.uid} en '/lusers'`, "color: green;"); // CAMBIADO a 'lusers'
-      }
-    } catch (error: any) {
-       const createProfileErrorMessage = error.message || "Error desconocido durante la verificación/creación del perfil.";
-       const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-       const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
-       const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO";
-            
-       console.error(
-          `%c\n\n🆘🆘🆘 ALERTA CRÍTICA DE PERMISOS DE FIRESTORE (Proyecto: ${finalProjectId}) 🆘🆘🆘\n\n` +
-          `AuthContext (handleLoginSuccess): FALLÓ al ${operationAttempted} para UID: ${firebaseUser.uid}.\n` +
-          `ERROR: ${createProfileErrorMessage}\n\n` +
-          `CAUSA MÁS PROBABLE: Tus REGLAS DE SEGURIDAD de Firestore NO PERMITEN:\n` +
-          `  1. LEER ('get') el documento '/lusers/${firebaseUser.uid}' (para verificar si existe).\n` + // CAMBIADO a 'lusers'
-          `  O\n` +
-          `  2. CREAR ('create') el documento '/lusers/${firebaseUser.uid}' (si no existía).\n\n` + // CAMBIADO a 'lusers'
-          `ACCIÓN REQUERIDA (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules):\n` +
-          `Asegúrate de tener reglas como:\n` +
-          `  match /lusers/{userId} {\n` + // CAMBIADO a 'lusers'
-          `    allow read: if request.auth.uid == userId;\n` +
-          `    allow create: if request.auth.uid == userId; // Y que el ID del doc sea el UID del usuario\n` +
-          `    // ... (otras reglas: update, delete)\n` +
-          `  }\n` +
-          `URL: https://console.firebase.google.com/project/${finalProjectId}/firestore/rules\n\n` +
-          `**LA APLICACIÓN NO FUNCIONARÁ CORRECTAMENTE HASTA QUE ESTOS PERMISOS SE CORRIJAN EN FIREBASE.**\n\n`,
-          "background: #FFD2D2; color: #D8000C; font-size: 12px; font-weight: bold; padding: 10px; border: 1px solid #D8000C; line-height: 1.5;"
-       );
-    }
-    
+    // La creación/verificación del perfil ya se maneja en el onAuthStateChanged global.
+    // Aquí solo nos aseguramos de que se carguen los datos.
     try {
       await fetchUserAppDataCallback(firebaseUser.uid); 
     } catch (error) {
@@ -184,22 +144,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [user, fetchUserAppDataCallback]);
 
   useEffect(() => {
-    console.log(`%cAuthContext useEffect[onAuthStateChanged]: Suscribiendo. Loading inicial: ${loading}`, "color: magenta;");
+    console.log(`%cAuthContext useEffect[onAuthStateChanged]: Subscribing. Initial loading: ${loading}`, "color: magenta;");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser); 
-        setLoading(true); // Indicar que estamos cargando datos para este usuario
+        setLoading(true); 
         
         let operationAttempted = "getDoc (verificar perfil)";
         try {
-          const userDocRef = doc(db, "lusers", firebaseUser.uid); // CAMBIADO a 'lusers'
-          console.log(`%cAuthContext: Intentando OBTENER perfil desde Firestore para verificar existencia. Ruta: /lusers/${firebaseUser.uid}`, "color: blue;"); // CAMBIADO a 'lusers'
+          const userDocRef = doc(db, "users", firebaseUser.uid); 
+          console.log(`%cAuthContext: Attempting to GET profile from Firestore. Path: /users/${firebaseUser.uid}, UID: ${firebaseUser.uid}`, "color: blue;");
           const docSnap = await getDoc(userDocRef);
           
           if (!docSnap.exists()) {
-            operationAttempted = `setDoc (crear perfil) en /lusers/${firebaseUser.uid}`; // CAMBIADO a 'lusers'
-            console.log(`%cAuthContext: Perfil NO encontrado para UID: ${firebaseUser.uid}. Intentando CREAR nuevo perfil...`, "color: orange; font-weight: bold;");
+            operationAttempted = `setDoc (crear perfil) en /users/${firebaseUser.uid}`; 
+            console.log(`%cAuthContext: Profile NOT found for UID: ${firebaseUser.uid}. Attempting to CREATE new profile...`, "color: orange; font-weight: bold;");
             await setDoc(userDocRef, {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
@@ -210,9 +170,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               gender: null,
               authProvider: firebaseUser.providerData?.[0]?.providerId || "password",
             });
-            console.log(`%cAuthContext: Perfil CREADO automáticamente en Firestore para UID: ${firebaseUser.uid} en '/lusers'`, "color: green; font-weight: bold;"); // CAMBIADO a 'lusers'
+            console.log(`%cAuthContext: Perfil CREADO automáticamente en Firestore para UID: ${firebaseUser.uid} en '/users'`, "color: green; font-weight: bold;");
           } else {
-            console.log(`%cAuthContext: Perfil ya existe para UID: ${firebaseUser.uid} en '/lusers'`, "color: green;"); // CAMBIADO a 'lusers'
+            console.log(`%cAuthContext: Perfil ya existe para UID: ${firebaseUser.uid} en '/users'`, "color: green;"); 
           }
         } catch (error: any) {
             const createProfileErrorMessage = error.message || "Error desconocido durante la verificación/creación del perfil.";
@@ -225,12 +185,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               `AuthContext: FALLÓ al ${operationAttempted} para UID: ${firebaseUser.uid} en onAuthStateChanged.\n` +
               `ERROR: ${createProfileErrorMessage}\n\n` +
               `CAUSA MÁS PROBABLE: Tus REGLAS DE SEGURIDAD de Firestore NO PERMITEN:\n` +
-              `  1. LEER ('get') el documento '/lusers/${firebaseUser.uid}' (para verificar si existe).\n` + // CAMBIADO a 'lusers'
+              `  1. LEER ('get') el documento '/users/${firebaseUser.uid}' (para verificar si existe).\n` + 
               `  O\n` +
-              `  2. CREAR ('create') el documento '/lusers/${firebaseUser.uid}' (si no existía).\n\n` + // CAMBIADO a 'lusers'
+              `  2. CREAR ('create') el documento '/users/${firebaseUser.uid}' (si no existía).\n\n` + 
               `ACCIÓN REQUERIDA (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules):\n` +
               `Asegúrate de tener reglas como:\n` +
-              `  match /lusers/{userId} {\n` + // CAMBIADO a 'lusers'
+              `  match /users/{userId} {\n` + 
               `    allow read: if request.auth.uid == userId;\n` +
               `    allow create: if request.auth.uid == userId; // Y que el ID del doc sea el UID del usuario\n` +
               `    // ... (otras reglas: update, delete)\n` +
@@ -243,7 +203,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         
         await fetchUserAppDataCallback(firebaseUser.uid);
         setLoading(false); 
-        console.log(`%cAuthContext onAuthStateChanged: Usuario ${firebaseUser.uid} procesado. Loading establecido a false.`, "color: teal;");
+        console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
         setUser(null);
         setUserProfile(null);
@@ -257,7 +217,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("%cAuthContext useEffect[onAuthStateChanged]: Desuscribiendo.", "color: magenta;");
       unsubscribe();
     };
-  }, [fetchUserAppDataCallback]); // fetchUserAppDataCallback tiene dependencia vacía []
+  }, [fetchUserAppDataCallback]); 
 
   return (
     <AuthContext.Provider value={{
@@ -281,5 +241,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
