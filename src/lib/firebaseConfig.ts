@@ -1,7 +1,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, type Firestore } from "firebase/firestore"; // CORREGIDO
 import { getAnalytics, type Analytics } from "firebase/analytics";
 
 // Your web app's Firebase configuration directly provided.
@@ -30,18 +30,11 @@ let analyticsInstance: Analytics | null = null;
 
 if (typeof window !== 'undefined') {
   // Initialize Analytics only on the client side
-  // Ensure it's only called once per app instance as well
   try {
     analyticsInstance = getAnalytics(app);
   } catch (e) {
     // console.warn("Firebase Analytics could not be initialized or already initialized:", e);
-    // It's possible getAnalytics throws if called multiple times on the same app instance,
-    // or if some conditions aren't met. This catch is to prevent app crash.
-    // If analytics is crucial, further investigation on the specific error 'e' would be needed.
   }
 }
 
-// Exporting renamed instances to avoid potential naming conflicts with firebase module itself in some contexts
-// Also exporting firebaseConfig for use in diagnostics or other parts of the app if needed.
-export { app, authInstance as auth, dbInstance as db, analyticsInstance as analytics, firebaseConfig };
-
+export { app, authInstance as auth, dbInstance as db, firebaseConfig, analyticsInstance as analytics };
