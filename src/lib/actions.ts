@@ -3,7 +3,7 @@
 
 import { auth, db } from "@/lib/firebaseConfig";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod";
+import { z } from "zod"; // Ensure Zod is imported
 import type { UserProfile, StreakData, Question } from "@/types";
 import { signInWithEmailAndPassword, signOut as firebaseSignOut } from "firebase/auth";
 
@@ -16,36 +16,20 @@ import { signInWithEmailAndPassword, signOut as firebaseSignOut } from "firebase
 //
 // SIGNIFICA QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
 // DEBES IR A TU CONSOLA DE FIREBASE -> Firestore Database -> Rules (Reglas)
-// Y ASEGURARTE DE QUE LAS REGLAS PARA LA COLECCIÓN 'users' (o como se llame tu colección de usuarios)
+// Y ASEGURARTE DE QUE LAS REGLAS PARA LA COLECCIÓN AFECTADA (ej: 'users', 'questions')
 // PERMITAN LA OPERACIÓN ESPECÍFICA ('read', 'create', 'update') PARA EL USUARIO AUTENTICADO.
+//
 // EJEMPLO PARA /users/{userId}:
 //   match /users/{userId} {
-//     allow read: if request.auth.uid == userId;
-//     allow create: if request.auth.uid == userId;
-//     allow update: if request.auth.uid == userId;
-//     // ... y también para subcolecciones como streaks/summary y dailyProgress ...
+//     allow read: if request.auth.uid == userId; // Para leer perfiles
+//     allow create: if request.auth.uid == userId; // Para crear perfiles al registrarse
+//     allow update: if request.auth.uid == userId; // Para actualizar perfiles
 //   }
 //
 // ESTE CÓDIGO DE LA APLICACIÓN NO PUEDE SOLUCIONAR UN PROBLEMA DE PERMISOS.
 // LA CORRECCIÓN DEBE HACERSE EN TUS REGLAS DE SEGURIDAD EN FIREBASE.
 // =========================================================================================
 export async function getUserProfile(userId: string): Promise<{ success: boolean, data?: UserProfile, error?: string }> {
-  // =========================================================================================
-  // SI ESTA FUNCIÓN DEVUELVE UN ERROR DE "PERMISOS DENEGADOS" (PERMISSION_DENIED),
-  // SIGNIFICA QUE LAS REGLAS DE SEGURIDAD DE FIRESTORE NO PERMITEN LEER EL DOCUMENTO
-  // '/users/{userId}'.
-  //
-  // EN TU CONSOLA DE FIREBASE -> Firestore Database -> Rules, ASEGÚRATE DE TENER:
-  // service cloud.firestore {
-  //   match /databases/{database}/documents {
-  //     match /users/{userId} {
-  //       allow read: if request.auth.uid == userId;
-  //       // ... otras reglas ...
-  //     }
-  //   }
-  // }
-  // ¡Y PUBLICA LOS CAMBIOS!
-  // =========================================================================================
   const collectionName = "users";
   console.log(`[getUserProfile Server Action] Attempting to get profile for userId: ${userId} from collection '${collectionName}'`);
   try {
@@ -62,7 +46,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
         age: data.age === undefined || data.age === null ? '' : Number(data.age),
         gender: data.gender === undefined || data.gender === null ? '' : String(data.gender),
       };
-      console.log(`[getUserProfile Server Action] Profile found for ${userId}:`, profileData);
+      console.log(`[getUserProfile Server Action] Profile found for ${userId}:`, JSON.stringify(profileData));
       return { success: true, data: profileData };
     } else {
       console.warn(`[getUserProfile Server Action] Perfil de usuario no encontrado en Firestore para UID: ${userId} en colección '${collectionName}'`);
@@ -192,7 +176,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const collectionName = "users";
+  const collectionName = "users"; // Main user collection
   const actionName = "[recordPracticeSession Server Action]";
   console.log(`${actionName} Iniciando para userId: ${userId}, preguntasRespondidasCorrectamente: ${questionsAnsweredCorrectly}, temasCubiertos:`, topicsCovered);
 
@@ -208,7 +192,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 
   try {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0); // Normalize to start of day for consistent date comparisons
     console.log(`${actionName} Fecha de hoy (normalizada): ${today.toISOString()}`);
 
     const streakSummaryPath = `${collectionName}/${userId}/streaks/summary`;
@@ -220,29 +204,38 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 
     const batch = writeBatch(db);
 
+    // Get current streak summary
     const summarySnap = await getDoc(streakSummaryRef);
     let {
       currentStreak = 0,
       longestStreak = 0,
       totalQuestionsAnswered: summaryTotalQuestions = 0,
-      lastPracticeDate, 
-      completedDates = [] 
+      lastPracticeDate, // This will be a Firestore Timestamp or undefined
+      completedDates = [] // This will be an array of Firestore Timestamps or undefined
     } = summarySnap.exists() ? summarySnap.data() : {};
     
-    console.log(`${actionName} Datos de racha leídos de '${streakSummaryPath}':`, { currentStreak, longestStreak, summaryTotalQuestions, lastPracticeDate: lastPracticeDate instanceof Timestamp ? lastPracticeDate.toDate().toISOString() : null, completedDatesCount: completedDates.length });
+    console.log(`${actionName} Datos de racha leídos de '${streakSummaryPath}':`, { 
+      currentStreak, 
+      longestStreak, 
+      summaryTotalQuestions, 
+      lastPracticeDate: lastPracticeDate instanceof Timestamp ? lastPracticeDate.toDate().toISOString() : null, 
+      completedDatesCount: completedDates.length 
+    });
 
+    // Convert completedDates from Timestamps to JS Date objects (normalized) for logic
     let completedDatesJS: Date[] = (Array.isArray(completedDates) ? completedDates : []).map((d: any) => {
         let dateObj: Date | null = null;
         if (d instanceof Timestamp) dateObj = d.toDate();
-        else if (d instanceof Date) dateObj = new Date(d.getTime());
-        else if (typeof d === 'string' || typeof d === 'number') dateObj = new Date(d);
+        else if (d instanceof Date) dateObj = new Date(d.getTime()); // Clone if already Date
+        else if (typeof d === 'string' || typeof d === 'number') dateObj = new Date(d); // Attempt to parse if string/number
         
-        if (dateObj && !isNaN(dateObj.getTime())) {
-            dateObj.setHours(0,0,0,0);
+        if (dateObj && !isNaN(dateObj.getTime())) { // Check if valid date
+            dateObj.setHours(0,0,0,0); // Normalize
             return dateObj;
         }
+        console.warn(`${actionName} Elemento no válido encontrado en completedDates y será filtrado:`, d);
         return null;
-    }).filter((d): d is Date => d !== null);
+    }).filter((d): d is Date => d !== null); // Filter out nulls and ensure type
 
     const practiceDayAlreadyRecorded = completedDatesJS.some(d => d.getTime() === today.getTime());
     console.log(`${actionName} ¿Día de práctica ya registrado para hoy (${today.toISOString()})?: ${practiceDayAlreadyRecorded}`);
@@ -252,22 +245,29 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       const lastPracticeDateJS = lastPracticeDate instanceof Timestamp ? lastPracticeDate.toDate() : (lastPracticeDate ? new Date(lastPracticeDate) : null);
 
       if (lastPracticeDateJS) {
-        lastPracticeDateJS.setHours(0, 0, 0, 0);
+        lastPracticeDateJS.setHours(0, 0, 0, 0); // Normalize
         const yesterday = new Date(today);
-        yesterday.setDate(today.getDate() - 1);
+        yesterday.setDate(today.getDate() - 1); // yesterday is already normalized because 'today' is
 
         if (lastPracticeDateJS.getTime() === yesterday.getTime()) {
           currentStreak += 1;
+          console.log(`${actionName} Racha continuada. Nueva racha actual: ${currentStreak}`);
         } else if (lastPracticeDateJS.getTime() !== today.getTime()) { 
+          // If last practice wasn't yesterday and also not today (covered by !practiceDayAlreadyRecorded)
           currentStreak = 1;
+          console.log(`${actionName} Racha interrumpida. Nueva racha actual: ${currentStreak}`);
         }
-      } else {
+        // If lastPracticeDateJS.getTime() === today.getTime(), it means it's a subsequent session on the same day, streak already handled by practiceDayAlreadyRecorded logic.
+      } else { // No previous practice recorded
         currentStreak = 1;
+        console.log(`${actionName} Primera práctica registrada. Racha actual: ${currentStreak}`);
       }
       if (currentStreak > longestStreak) {
         longestStreak = currentStreak;
+        console.log(`${actionName} Nueva racha más larga: ${longestStreak}`);
       }
-      completedDatesJS.push(new Date(today.getTime()));
+      completedDatesJS.push(new Date(today.getTime())); // Add today (normalized)
+      console.log(`${actionName} Hoy añadido a completedDates. Total días completados: ${completedDatesJS.length}`);
     } else {
       console.log(`${actionName} Ya se practicó hoy. Racha no modificada. Solo se actualizará el total de preguntas y el progreso diario.`);
     }
@@ -279,12 +279,13 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       currentStreak,
       longestStreak,
       totalQuestionsAnswered: summaryTotalQuestions,
-      lastPracticeDate: Timestamp.fromDate(today),
-      completedDates: completedDatesJS.map(d => Timestamp.fromDate(d))
+      lastPracticeDate: Timestamp.fromDate(today), // Store as Firestore Timestamp
+      completedDates: completedDatesJS.map(d => Timestamp.fromDate(d)) // Store as array of Timestamps
     };
     console.log(`${actionName} Datos para escribir en el resumen de racha ('${streakSummaryPath}'):`, JSON.stringify(dataForSummary, null, 2));
     batch.set(streakSummaryRef, dataForSummary, { merge: true });
 
+    // Update daily progress
     const dailyProgressSnap = await getDoc(dailyRecordRef);
     const existingDailyQuestions = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.questionsAnswered : 0;
     const existingTopics = dailyProgressSnap.exists() ? dailyProgressSnap.data()!.topics : [];
@@ -293,7 +294,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     const dataForDaily = {
       questionsAnswered: existingDailyQuestions + questionsAnsweredCorrectly,
       topics: updatedTopics,
-      date: Timestamp.fromDate(today),
+      date: Timestamp.fromDate(today), // Store as Firestore Timestamp
     };
     console.log(`${actionName} Datos para escribir en el progreso diario ('${dailyRecordPath}'):`, JSON.stringify(dataForDaily, null, 2));
     batch.set(dailyRecordRef, dataForDaily, { merge: true });
@@ -303,23 +304,22 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     return { success: "¡Sesión de práctica registrada!" };
   } catch (error: any) {
     console.error(`${actionName} Error durante la operación para UID: ${userId}:`, error);
-    const path1 = `/${collectionName}/${userId}/streaks/summary`;
-    const path2 = `/${collectionName}/${userId}/dailyProgress/...`;
+    const streakPath = `/${collectionName}/${userId}/streaks/summary`;
+    const dailyProgressGenericPath = `/${collectionName}/${userId}/dailyProgress/{dateId}`;
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${path1}' Y '${path2}'. Esto se configura dentro de 'match /${collectionName}/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${streakPath}' Y '${dailyProgressGenericPath}'. Esto se configura dentro de 'match /${collectionName}/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
   }
 }
 
-
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const collectionName = "users";
+  const collectionName = "users"; // Main user collection
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${collectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -329,29 +329,34 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
 
     if (summarySnap.exists()) {
       const data = summarySnap.data();
+      // Ensure completedDates is treated as an array, even if missing or null from Firestore
       const completedDatesArray = Array.isArray(data.completedDates) ? data.completedDates : [];
       
       const completedDatesJS = completedDatesArray.map((ts: any) => {
         let date: Date | null = null;
-        if (ts instanceof Timestamp) {
+        // Check if it's a Firestore Timestamp
+        if (ts && typeof ts.toDate === 'function') {
           date = ts.toDate();
-        } else if (ts && typeof ts.toDate === 'function') {
-            date = ts.toDate();
+        // Check if it's already a JS Date (e.g., from previous processing or bad data)
         } else if (ts instanceof Date) {
-            date = new Date(ts.getTime());
+          date = new Date(ts.getTime()); // Create a new Date object to avoid modifying original
+        // Attempt to parse if it's a string or number representation of a date
         } else if (typeof ts === 'string' || typeof ts === 'number') {
-            const parsedDate = new Date(ts);
-            if (!isNaN(parsedDate.getTime())) {
-                date = parsedDate;
-            }
+          const parsedDate = new Date(ts);
+          if (!isNaN(parsedDate.getTime())) { // Check if parsing was successful
+            date = parsedDate;
+          }
         }
+
+        // If we have a valid date, normalize it to the start of the day
         if (date) {
           date.setHours(0, 0, 0, 0);
           return date;
         }
+        // Log and filter out invalid date entries
         console.warn(`${actionName} Elemento no válido encontrado en completedDates y será filtrado:`, ts);
         return null;
-      }).filter(date => date instanceof Date) as Date[];
+      }).filter(date => date instanceof Date) as Date[]; // Ensure only valid Date objects remain
 
       const streakDataResult: StreakData = {
         currentStreak: data.currentStreak || 0,
@@ -360,6 +365,7 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
         completedDates: completedDatesJS,
       };
       console.log(`${actionName} Datos de racha encontrados para ${userId} en '${streakSummaryPath}'.`);
+      // console.log(JSON.stringify(streakDataResult, null, 2)); // For detailed logging if needed
       return streakDataResult;
     } else {
       console.log(`${actionName} No se encontró resumen de racha para ${userId} en '${streakSummaryPath}'. Devolviendo valores por defecto.`);
@@ -367,9 +373,11 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     }
   } catch (error: any) {
     console.error(`${actionName} Error al obtener datos de racha para ${userId} desde '${streakSummaryPath}':`, error);
+    // Specific check for permission denied errors
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad.`);
+      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow read: if request.auth.uid == userId;' para la ruta '/${collectionName}/${userId}/streaks/summary'.`);
     }
+    // Return default data on any error to prevent UI crashes
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
