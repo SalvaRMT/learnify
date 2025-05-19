@@ -56,7 +56,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // Y ASEGÚRATE DE TENER: match /users/{userId} { allow read: if request.auth.uid == userId; }
           // =========================================================================================
           const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-          const projectIdFromConfigHardcoded = firebaseConfig.projectId; // Ahora firebaseConfig está importado
+          // firebaseConfig es importado desde @/lib/firebaseConfig
+          const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
           const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO (¡CONFIGURAR projectId!)";
 
           console.error(
@@ -65,7 +66,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             `MOTIVO: Tus REGLAS DE SEGURIDAD de Firestore son INCORRECTAS o no se han propagado correctamente.\n\n` +
             `ACCIÓN REQUERIDA (EN LA CONSOLA DE FIREBASE):\n` +
             `1. Ve a tu proyecto de Firebase: ${finalProjectId}\n` +
-            `2. Navega a: Firestore Database -> Pestaña 'Rules'.\n` +
+            `2. Navega a: Firestore Database -> Pestaña 'Rules'. (URL: https://console.firebase.google.com/project/${finalProjectId}/firestore/rules)\n` +
             `3. ASEGÚRATE de que la regla para leer documentos en '/users/{userId}' sea EXACTAMENTE:\n` +
             `   match /users/{userId} {\n` +
             `     allow read: if request.auth.uid == userId;\n` +
@@ -93,13 +94,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUserAppDataCallback = useCallback(async () => {
     if (user) {
       console.log(`%cAuthContext: refreshUserAppDataCallback called for UID: ${user.uid}`, "color: purple;");
-      setLoading(true); 
+      setLoading(true); // Indicar que la carga ha comenzado
       try {
         await fetchUserAppDataCallback(user.uid);
       } catch (error) {
         console.error(`%cAuthContext: Error during refreshUserAppDataCallback for ${user.uid}:`, "color: red;", error);
       } finally {
-        setLoading(false); 
+        setLoading(false); // Indicar que la carga ha terminado, incluso si hay un error
         console.log(`%cAuthContext: refreshUserAppDataCallback finished for UID: ${user.uid}. Loading set to false.`, "color: purple;");
       }
     } else {
@@ -125,17 +126,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser); 
-        if(!userProfile || userProfile.uid !== firebaseUser.uid) { // Fetch only if profile isn't loaded or belongs to a different user
-            setLoading(true); 
-            try {
-                await fetchUserAppDataCallback(firebaseUser.uid);
-            } finally {
-                setLoading(false); 
-            }
-        } else {
-            setLoading(false); // Already have profile for this user or initial load done
+        // Siempre intentar cargar datos si el usuario cambia o si es el primer usuario detectado
+        // setLoading(true) se manejará dentro de fetchUserAppDataCallback o handleLoginSuccessCallback
+        // si estas funciones son llamadas desde otros lugares (como el login form).
+        // Aquí, nos aseguramos de que loading se ponga en true si aún no lo estaba por un login directo.
+        if (!loading) setLoading(true); 
+        try {
+            await fetchUserAppDataCallback(firebaseUser.uid);
+        } finally {
+            setLoading(false); 
+             console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
         }
-        console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
         setUser(null);
         setUserProfile(null);
@@ -150,7 +151,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchUserAppDataCallback]); 
+  }, [fetchUserAppDataCallback]); // No es necesario incluir 'loading' aquí, ya que su cambio no debe re-suscribir
 
   return (
     <AuthContext.Provider value={{ 
@@ -174,5 +175,4 @@ export const useAuth = () => {
   }
   return context;
 };
-
     
