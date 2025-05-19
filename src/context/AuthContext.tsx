@@ -34,11 +34,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.warn("%cAuthContext: fetchUserAppDataCallback called with no UID.", "color: yellow;");
       setUserProfile(null);
       setStreakData(null);
-      // setLoading(false) will be handled by onAuthStateChanged or finally block
       return;
     }
     
-    // No need to setLoading(true) here if onAuthStateChanged already did
+    // setLoading(true) // No need to set loading true here if the caller (onAuthStateChanged) already did for the initial auth check
     try {
       const [profileResult, fetchedStreakData] = await Promise.all([
         getUserProfile(uid),
@@ -51,6 +50,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         console.warn(`%cAuthContext: Profile NOT found or error for UID: ${uid}. Error: ${profileResult.error}`, "color: red; font-weight: bold;");
         if (profileResult.error?.includes("permission-denied") || profileResult.error?.includes("permisos")) {
+          // ESTE MENSAJE DE CONSOLA ES UN DIAGNÓSTICO. INDICA QUE LAS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
+          // LA SOLUCIÓN ES ARREGLAR LAS REGLAS EN LA CONSOLA DE FIREBASE, NO EN ESTE CÓDIGO.
           console.error(`%cERROR DE PERMISOS DE FIRESTORE: No se pudo LEER el perfil para el usuario ${uid}. Revisa tus REGLAS DE SEGURIDAD de Firestore. La regla necesaria es 'allow read: if request.auth.uid == userId;' en la ruta '/users/{userId}'.`, "background: red; color: white; font-size: 14px; font-weight: bold; padding: 5px;");
         }
         setUserProfile(null);
@@ -64,17 +65,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserProfile(null);
       setStreakData(null);
     }
-    // setLoading(false) will be handled by the caller (onAuthStateChanged or refreshUserAppData)
   }, []);
 
   const refreshUserAppDataCallback = useCallback(async () => {
     if (user) {
       console.log(`%cAuthContext: refreshUserAppDataCallback called for UID: ${user.uid}`, "color: purple;");
-      setLoading(true); // Indicate loading
+      setLoading(true);
       try {
         await fetchUserAppDataCallback(user.uid);
       } finally {
-        setLoading(false); // Done loading
+        setLoading(false); 
       }
     } else {
       console.warn("%cAuthContext: refreshUserAppDataCallback called but no user is logged in.", "color: yellow;");
@@ -84,7 +84,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
     console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}`, "color: green; font-weight: bold;");
     setLoading(true); 
-    setUser(firebaseUser); // Set user immediately
+    setUser(firebaseUser); 
     try {
       await fetchUserAppDataCallback(firebaseUser.uid);
     } finally {
@@ -98,8 +98,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
-        setUser(firebaseUser); // Set user immediately
-        setLoading(true); // Set loading true while fetching app data
+        setUser(firebaseUser); 
+        setLoading(true); 
         try {
           await fetchUserAppDataCallback(firebaseUser.uid);
         } finally {
@@ -120,7 +120,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchUserAppDataCallback]); // Added fetchUserAppDataCallback
+  }, [fetchUserAppDataCallback]);
 
 
   return (
