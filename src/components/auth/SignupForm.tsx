@@ -31,8 +31,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
-// useAuth no es necesario aquí si la creación del perfil y la navegación la maneja el AuthContext
-// import { useAuth } from "@/context/AuthContext"; 
+import { useAuth } from "@/context/AuthContext"; 
 
 const SignUpSchema = z.object({
   nombreCompleto: z.string().min(2, "El nombre completo debe tener al menos 2 caracteres."),
@@ -46,14 +45,14 @@ export function SignupForm() {
   const router = useRouter();
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  // const { handleLoginSuccess } = useAuth(); // No se usa handleLoginSuccess aquí
+  const { handleLoginSuccess } = useAuth(); 
 
   const form = useForm<z.infer<typeof SignUpSchema>>({
     resolver: zodResolver(SignUpSchema),
     defaultValues: {
       nombreCompleto: "",
-      edad: '', // Se mantiene como string para el input, Zod lo coerciona a número o null
-      genero: "", // Se mantiene como string para el select, Zod lo coerciona a string o null
+      edad: '', 
+      genero: "", 
       email: "",
       contrasena: "",
     },
@@ -66,29 +65,23 @@ export function SignupForm() {
         const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.contrasena);
         const firebaseUser = userCredential.user;
 
-        // Crear el documento de perfil en Firestore
-        // AuthContext también intentará crear un perfil si no existe al detectar el usuario,
-        // pero es bueno crearlo aquí explícitamente con los datos del formulario.
-        await setDoc(doc(db, "users", firebaseUser.uid), {
+        await setDoc(doc(db, "lusers", firebaseUser.uid), { // CAMBIADO a 'lusers'
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           fullName: values.nombreCompleto,
-          age: values.edad, // Zod ya lo transformó a número o null
-          gender: values.genero, // Zod ya lo transformó a string o null
+          age: values.edad, 
+          gender: values.genero, 
           createdAt: serverTimestamp(),
-          practiceTime: 15, // Default practice time
-          authProvider: "password", // 'password' para email/contraseña
+          practiceTime: 15, 
+          authProvider: "password", 
         });
         
-        console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore.");
+        console.log("SignupForm: Client-side createUserWithEmailAndPassword successful, user data saved to Firestore in 'lusers'.");
         
         toast({
           title: "Registro Exitoso",
           description: "¡Cuenta creada! Procede a configurar tu tiempo de práctica.",
         });
-        // No se llama a handleLoginSuccess aquí.
-        // onAuthStateChanged en AuthContext detectará el nuevo usuario.
-        // Redirigir a practice-time como antes.
         router.replace(`/practice-time?userId=${firebaseUser.uid}`); 
       } catch (error: any) {
         console.error("SignupForm: Client-side createUserWithEmailAndPassword failed", error);
@@ -104,7 +97,7 @@ export function SignupForm() {
         } else if (error.code === 'auth/configuration-not-found') {
             errorMessage = `No se encontró la configuración de Firebase Authentication para este proyecto. Asegúrate de que Authentication esté habilitado y configurado en la consola de Firebase. (Código: ${error.code})`;
         } else if (error.code === 'permission-denied') {
-            errorMessage = `Error de registro: PERMISOS DENEGADOS al intentar crear el perfil en Firestore. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow create: if request.auth.uid == userId;' en la ruta '/users/{userId}'. (Código: ${error.code})`;
+            errorMessage = `Error de registro: PERMISOS DENEGADOS al intentar crear el perfil en Firestore en la colección '/lusers'. Revisa tus reglas de seguridad de Firestore. La regla necesaria es 'allow create: if request.auth.uid == userId;' en la ruta '/lusers/{userId}'. (Código: ${error.code})`;
         } else if (error.message) {
           errorMessage = `Error al registrarse: ${error.message} (Código: ${error.code})`;
         }
@@ -154,7 +147,6 @@ export function SignupForm() {
                       type="number"
                       placeholder="25"
                       {...field}
-                      // El valor se maneja como string para el input, Zod lo coerciona
                       onChange={e => field.onChange(e.target.value === '' ? '' : e.target.value)}
                       value={field.value === undefined || field.value === null ? '' : String(field.value)}
                     />
