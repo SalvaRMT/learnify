@@ -37,6 +37,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    // setLoading(true); // No set loading here, onAuthStateChanged handles initial load. refreshUserAppData will handle its own.
     try {
       const [profileResult, fetchedStreakDataResult] = await Promise.all([
         getUserProfile(uid),
@@ -54,7 +55,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // LA SOLUCIÓN ES ARREGLAR LAS REGLAS EN LA CONSOLA DE FIREBASE, NO EN ESTE CÓDIGO.
           // =========================================================================================
           const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-          const projectIdFromConfigHardcoded = firebaseConfig.projectId;
+          const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
           const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO (¡CONFIGURAR projectId!)";
 
           console.error(
@@ -70,7 +71,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             `     // ... también necesitarás 'allow create', 'allow update' para otras operaciones ...\n` +
             `   }\n` +
             `4. ¡HAZ CLIC EN "PUBLICAR" DESPUÉS DE CAMBIAR LAS REGLAS!\n` +
-            `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n\n` +
+            `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n` +
+            `6. CONSEJO EXTRA: Utiliza el "Simulador de Reglas" en la pestaña 'Rules' de Firestore para probar tus reglas con el UID '${uid}'.\n\n`+
             `**ESTE MENSAJE ES UN DIAGNÓSTICO DE LA APLICACIÓN. LA SOLUCIÓN REQUIERE QUE ACTUALICES TUS REGLAS DE SEGURIDAD EN LA CONSOLA DE FIREBASE.**\n\n`+
             `Error original de Firestore reportado por la acción getUserProfile: "${profileResult.error}"\n\n`,
             "background: red; color: white; font-size: 16px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
@@ -86,8 +88,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error(`%cAuthContext: Error en fetchUserAppDataCallback for ${uid}:`, "color: red;", error);
       setUserProfile(null);
       setStreakData(null);
-    }
+    } /* finally {
+      // setLoading(false); // Loading is managed by onAuthStateChanged for initial load
+    } */
   }, []);
+
+  const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
+    console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}.`, "color: green; font-weight: bold;");
+    setUser(firebaseUser); 
+    setLoading(true); // Set loading true before fetching app data for a new login
+    try {
+      await fetchUserAppDataCallback(firebaseUser.uid);
+    } finally {
+      setLoading(false);
+      console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now false.`, "color: green; font-weight: bold;");
+    }
+  }, [fetchUserAppDataCallback]);
 
   const refreshUserAppDataCallback = useCallback(async () => {
     if (user) {
@@ -106,31 +122,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [user, fetchUserAppDataCallback]);
 
-  const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
-    console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}. Setting loading true.`, "color: green; font-weight: bold;");
-    setLoading(true);
-    setUser(firebaseUser); // Set user immediately
-    try {
-      await fetchUserAppDataCallback(firebaseUser.uid);
-    } finally {
-      setLoading(false);
-      console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now false.`, "color: green; font-weight: bold;");
-    }
-  }, [fetchUserAppDataCallback]);
-
   useEffect(() => {
     console.log(`%cAuthContext useEffect[onAuthStateChanged]: Subscribing. Initial loading: ${loading}`, "color: magenta;");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser);
-        setLoading(true); // Set loading true before fetching app data
-        try {
-          await fetchUserAppDataCallback(firebaseUser.uid);
-        } finally {
-          setLoading(false);
-          console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
-        }
+        // setLoading(true); // No need to set loading true here, fetchUserAppDataCallback will be called which might influence loading for specific scenarios or initial load
+        await fetchUserAppDataCallback(firebaseUser.uid); // Fetch profile and streak data
+        setLoading(false); // Set loading to false after user data has been fetched/attempted
+        console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
         setUser(null);
         setUserProfile(null);
@@ -145,7 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchUserAppDataCallback]); // Dependencies: only fetchUserAppDataCallback is stable.
+  }, [fetchUserAppDataCallback]); 
 
   return (
     <AuthContext.Provider value={{
@@ -169,3 +170,4 @@ export const useAuth = () => {
   }
   return context;
 };
+
