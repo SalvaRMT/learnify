@@ -3,7 +3,7 @@
 
 import type { User as FirebaseUser } from "firebase/auth";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { auth, db, firebaseConfig } from '@/lib/firebaseConfig'; // firebaseConfig IS imported
+import { auth, db, firebaseConfig } from '@/lib/firebaseConfig'; // Import firebaseConfig
 import { onAuthStateChanged } from 'firebase/auth';
 import { getUserProfile, getStudyStreakData } from "@/lib/actions";
 import type { UserProfile, StreakData } from "@/types";
@@ -36,6 +36,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setStreakData(null);
       return;
     }
+
+    // setLoading(true); // No es necesario aquí si el loading principal ya está activo
 
     try {
       const [profileResult, fetchedStreakDataResult] = await Promise.all([
@@ -87,25 +89,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error(`%cAuthContext: Error en fetchUserAppDataCallback for ${uid}:`, "color: red;", error);
       setUserProfile(null);
       setStreakData(null);
+    } finally {
+      // setLoading(false); // El loading principal se maneja en el onAuthStateChanged useEffect
     }
-  }, []); // Corregida la lista de dependencias
-
-  const refreshUserAppDataCallback = useCallback(async () => {
-    if (user) {
-      console.log(`%cAuthContext: refreshUserAppDataCallback called for UID: ${user.uid}. Setting loading true.`, "color: purple;");
-      setLoading(true);
-      try {
-        await fetchUserAppDataCallback(user.uid);
-      } catch (error) {
-        console.error(`%cAuthContext: Error during refreshUserAppDataCallback for ${user.uid}:`, "color: red;", error);
-      } finally {
-        setLoading(false);
-        console.log(`%cAuthContext: refreshUserAppDataCallback finished for UID: ${user.uid}. Loading set to false.`, "color: purple;");
-      }
-    } else {
-      console.warn("%cAuthContext: refreshUserAppDataCallback called but no user is logged in.", "color: yellow;");
-    }
-  }, [user, fetchUserAppDataCallback]);
+  }, []); // No tiene dependencias directas del estado del componente, se llama con UID
 
   const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
     console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}.`, "color: green; font-weight: bold;");
@@ -124,8 +111,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
-        setUser(firebaseUser);
-        // setLoading(true); // No establecer loading a true aquí, fetchUserAppDataCallback lo hará si es necesario, o la carga inicial ya está activa.
+        setUser(firebaseUser); // Actualiza el usuario inmediatamente
+        setLoading(true); // Poner loading a true MIENTRAS se cargan los datos de la app
         await fetchUserAppDataCallback(firebaseUser.uid);
         console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
@@ -141,7 +128,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("%cAuthContext useEffect[onAuthStateChanged]: Unsubscribing.", "color: magenta;");
       unsubscribe();
     };
-  }, [fetchUserAppDataCallback]); 
+  }, [fetchUserAppDataCallback]); // fetchUserAppDataCallback está envuelta en useCallback con []
+
+  const refreshUserAppDataCallback = useCallback(async () => {
+    if (user) {
+      console.log(`%cAuthContext: refreshUserAppDataCallback called for UID: ${user.uid}. Setting loading true.`, "color: purple;");
+      setLoading(true);
+      try {
+        await fetchUserAppDataCallback(user.uid);
+      } catch (error) {
+        console.error(`%cAuthContext: Error during refreshUserAppDataCallback for ${user.uid}:`, "color: red;", error);
+      } finally {
+        setLoading(false);
+        console.log(`%cAuthContext: refreshUserAppDataCallback finished for UID: ${user.uid}. Loading set to false.`, "color: purple;");
+      }
+    } else {
+      console.warn("%cAuthContext: refreshUserAppDataCallback called but no user is logged in.", "color: yellow;");
+    }
+  }, [user, fetchUserAppDataCallback]);
 
   return (
     <AuthContext.Provider value={{
@@ -165,3 +169,4 @@ export const useAuth = () => {
   }
   return context;
 };
+
