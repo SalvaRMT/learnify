@@ -36,15 +36,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.warn("%cAuthContext: fetchUserAppDataCallback called with no UID. Clearing user data.", "color: yellow;");
       setUserProfile(null);
       setStreakData(null);
-      // setLoading(false); // No establecer loading aquí, se maneja en el вызывающем onAuthStateChanged
       return;
     }
 
+    let fetchedProfileData: UserProfile | null = null;
+    let profileError: string | null = null;
+
     try {
-      // Leer perfil directamente desde el cliente
       const userDocRef = doc(db, "users", uid);
       const profileSnap = await getDoc(userDocRef);
-      let fetchedProfileData: UserProfile | null = null;
 
       if (profileSnap.exists()) {
         const data = profileSnap.data();
@@ -55,35 +55,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (data.lastLoginAt && data.lastLoginAt instanceof Timestamp) {
           fetchedProfileData.lastLoginAt = data.lastLoginAt.toDate();
         }
-        // Asegurar que age sea número o string vacío, y gender string o vacío.
         fetchedProfileData.age = data.age === undefined || data.age === null ? '' : Number(data.age);
         fetchedProfileData.gender = data.gender === undefined || data.gender === null ? '' : String(data.gender);
-
         setUserProfile(fetchedProfileData);
         console.log(`%cAuthContext: Profile found for ${uid}:`, "color: blue;", fetchedProfileData);
       } else {
-        // Este log es informativo. La creación del perfil ocurre en onAuthStateChanged si no existe.
-        console.warn(`%cAuthContext: Profile document NOT found in Firestore for UID: ${uid} during fetchUserAppData.`, "color: orange;");
-        setUserProfile(null);
+        console.warn(`%cAuthContext: Profile document NOT found in Firestore for UID: ${uid} during fetchUserAppData. This might be expected if it's a new user and profile creation failed or is pending.`, "color: orange;");
+        setUserProfile(null); // Explicitly set to null if not found
       }
-
-      const fetchedStreakDataResult = await getStudyStreakData(uid);
-      setStreakData(fetchedStreakDataResult);
-      console.log(`%cAuthContext: Streak data fetched for ${uid}:`, "color: blue;", fetchedStreakDataResult);
-
     } catch (error: any) {
-      console.error(`%cAuthContext: Error en fetchUserAppDataCallback for ${uid}:`, "color: red;", error);
-      const profileResultError = error.message || "Error desconocido al obtener perfil.";
-      
-      if (profileResultError.includes("permission-denied") || profileResultError.includes("permisos") || profileResultError.includes("Missing or insufficient permissions")) {
+      console.error(`%cAuthContext: Error fetching profile for UID ${uid} in fetchUserAppDataCallback:`, "color: red;", error);
+      profileError = error.message || "Error desconocido al obtener perfil.";
+      setUserProfile(null);
+    }
+
+    if (profileError) {
+        const profileResultError = profileError; // Use the captured error
+        console.warn(`%cAuthContext: Profile NOT found or error for UID: ${uid}. Error: ${profileResultError}`, "color: red; font-weight: bold;");
+        if (profileResultError.includes("permission-denied") || profileResultError.includes("permisos") || profileResultError.includes("Missing or insufficient permissions")) {
+          // ESTE MENSAJE DE CONSOLA ES UN DIAGNÓSTICO. INDICA QUE LAS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
+          // LA SOLUCIÓN ES ARREGLAR LAS REGLAS EN LA CONSOLA DE FIREBASE, NO EN ESTE CÓDIGO.
+          // =========================================================================================
+          // VERIFICA QUE EL PROJECT ID COINCIDA CON EL PROYECTO DONDE ESTÁS EDITANDO LAS REGLAS
+          // =========================================================================================
           const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
           const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
           const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO (¡CONFIGURAR projectId!)";
           
-          // =========================================================================================
-          // ESTE MENSAJE DE CONSOLA ES UN DIAGNÓSTICO. INDICA QUE LAS REGLAS DE SEGURIDAD DE FIRESTORE SON INCORRECTAS.
-          // LA SOLUCIÓN ES ARREGLAR LAS REGLAS EN LA CONSOLA DE FIREBASE, NO EN ESTE CÓDIGO.
-          // =========================================================================================
           console.error(
             `%c\n\n🔥🔥🔥 ALERTA CRÍTICA DE PERMISOS DE FIRESTORE (Proyecto: ${finalProjectId}) 🔥🔥🔥\n\n` +
             `La aplicación NO PUEDE LEER el perfil para el usuario UID: ${uid}\n` +
@@ -100,43 +98,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             `5. Espera 1-2 minutos para la propagación y REINICIA tu servidor de desarrollo.\n` +
             `6. CONSEJO EXTRA: Utiliza el "Simulador de Reglas" en la pestaña 'Rules' de Firestore para probar tus reglas con el UID '${uid}'.\n\n` +
             `**ESTE MENSAJE ES UN DIAGNÓSTICO DE LA APLICACIÓN. LA SOLUCIÓN REQUIERE QUE ACTUALICES TUS REGLAS DE SEGURIDAD EN LA CONSOLA DE FIREBASE.**\n\n` +
-            `Error original de Firestore reportado: "${profileResultError}"\n\n`,
-            "background: red; color: white; font-size: 14px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
+            `Error original de Firestore reportado por la acción getUserProfile: "${profileResultError}"\n\n`,
+            "background: red; color: white; font-size: 12px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
           );
         }
-      setUserProfile(null); 
-      setStreakData(null);  
+    }
+
+    try {
+      const fetchedStreakDataResult = await getStudyStreakData(uid);
+      setStreakData(fetchedStreakDataResult);
+      console.log(`%cAuthContext: Streak data fetched for ${uid}:`, "color: blue;", fetchedStreakDataResult);
+    } catch (error) {
+      console.error(`%cAuthContext: Error fetching streak data for UID ${uid}:`, "color: red;", error);
+      setStreakData(null); // O un estado de error/valor por defecto para streakData
     }
   }, []); 
 
   const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
     console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}. Current loading: ${loading}`, "color: green; font-weight: bold;");
-    // No necesitamos setLoading(true) aquí si onAuthStateChanged lo va a manejar.
-    // setUser(firebaseUser); // onAuthStateChanged lo hará
-    // El estado del usuario y la carga de datos de la aplicación se manejarán en onAuthStateChanged
-    // después de que el SDK de Firebase reconozca el inicio de sesión.
-    // Si la autenticación fue en el cliente, onAuthStateChanged debería dispararse.
-    // Si fue en el servidor y luego refrescamos, onAuthStateChanged debería dispararse.
-    // Podríamos forzar una carga aquí si fuera necesario, pero probemos sin ella primero.
-    await fetchUserAppDataCallback(firebaseUser.uid); // Carga proactiva de datos después del login
-    console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now ${loading}.`, "color: green;");
-
-  }, [fetchUserAppDataCallback, loading]); 
+    setLoading(true); // Indicar que estamos cargando datos del usuario
+    setUser(firebaseUser);
+    try {
+      await fetchUserAppDataCallback(firebaseUser.uid);
+    } catch (error) {
+       console.error(`%cAuthContext: Error en handleLoginSuccessCallback al llamar a fetchUserAppData:`, "color: red;", error);
+    } finally {
+      setLoading(false); 
+      console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now ${loading}.`, "color: green;");
+    }
+  }, [fetchUserAppDataCallback, loading]); // `loading` se añade como dependencia si su valor actual es relevante para la lógica interna de handleLoginSuccessCallback
 
   useEffect(() => {
     console.log(`%cAuthContext useEffect[onAuthStateChanged]: Subscribing. Initial loading: ${loading}`, "color: magenta;");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
-        setLoading(true); 
+        setLoading(true); // Comienza la carga en cuanto se detecta un usuario
         setUser(firebaseUser); 
 
+        // Intentar crear perfil si no existe
         const userDocRef = doc(db, "users", firebaseUser.uid);
         try {
-          const docSnap = await getDoc(userDocRef);
+          const docSnap = await getDoc(userDocRef); // Requiere permiso de LECTURA
           if (!docSnap.exists()) {
             console.log(`%cAuthContext: Profile NOT found for UID: ${firebaseUser.uid}. Attempting to create new profile...`, "color: orange; font-weight: bold;");
-            await setDoc(userDocRef, {
+            await setDoc(userDocRef, { // Requiere permiso de CREACIÓN
               uid: firebaseUser.uid,
               email: firebaseUser.email,
               fullName: firebaseUser.displayName || firebaseUser.email || "",
@@ -151,6 +157,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             console.log(`%cAuthContext: Profile already exists for UID: ${firebaseUser.uid}.`, "color: green;");
           }
         } catch (error: any) {
+            // ESTE ERROR ES CRÍTICO SI LA CREACIÓN/VERIFICACIÓN FALLA. PUEDE SER POR PERMISOS DE LECTURA O ESCRITURA.
             const projectIdFromEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
             const projectIdFromConfigHardcoded = firebaseConfig.projectId; 
             const finalProjectId = projectIdFromEnv || projectIdFromConfigHardcoded || "DESCONOCIDO";
@@ -172,11 +179,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               `  }\n` +
               `URL: https://console.firebase.google.com/project/${finalProjectId}/firestore/rules\n\n` +
               `**LA APLICACIÓN NO FUNCIONARÁ CORRECTAMENTE HASTA QUE ESTOS PERMISOS SE CORRIJAN EN FIREBASE.**\n\n`,
-              "background: red; color: white; font-size: 14px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
+              "background: red; color: white; font-size: 12px; font-weight: bold; padding: 10px; border: 3px solid darkred; line-height: 1.5;"
             );
         }
 
-        await fetchUserAppDataCallback(firebaseUser.uid);
+        await fetchUserAppDataCallback(firebaseUser.uid); // Cargar perfil y datos de racha
         console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
         setLoading(false); 
       } else {
@@ -233,3 +240,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    
