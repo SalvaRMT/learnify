@@ -24,7 +24,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [streakData, setStreakData] = useState<StreakData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Start with loading true
 
   console.log(`%cAuthProvider: Render/Re-render. Loading: ${loading}, User: ${user ? user.uid : 'null'}, Profile: ${userProfile ? 'loaded' : 'null'}, Streak: ${streakData ? 'loaded' : 'null'}`, "color: orange;");
 
@@ -34,10 +34,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.warn("%cAuthContext: fetchUserAppDataCallback called with no UID. Clearing user data.", "color: yellow;");
       setUserProfile(null);
       setStreakData(null);
+      // setLoading(false); // Ensure loading is false if uid is not present
       return;
     }
 
-    // setLoading(true); // No set loading here, onAuthStateChanged handles initial load. refreshUserAppData will handle its own.
+    // setLoading(true); // Set loading true at the start of data fetching for a specific user
     try {
       const [profileResult, fetchedStreakDataResult] = await Promise.all([
         getUserProfile(uid),
@@ -89,18 +90,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserProfile(null);
       setStreakData(null);
     } /* finally {
-      // setLoading(false); // Loading is managed by onAuthStateChanged for initial load
+      // setLoading(false); // This will be handled by onAuthStateChanged logic
     } */
   }, []);
 
+
   const handleLoginSuccessCallback = useCallback(async (firebaseUser: FirebaseUser) => {
     console.log(`%cAuthContext: handleLoginSuccessCallback for ${firebaseUser.uid}.`, "color: green; font-weight: bold;");
-    setUser(firebaseUser); 
-    setLoading(true); // Set loading true before fetching app data for a new login
+    setUser(firebaseUser); // Set user immediately
+    setLoading(true); // Indicate that we are now fetching app-specific data
     try {
       await fetchUserAppDataCallback(firebaseUser.uid);
     } finally {
-      setLoading(false);
+      setLoading(false); // Ensure loading is set to false after data fetch attempt
       console.log(`%cAuthContext: handleLoginSuccessCallback complete for ${firebaseUser.uid}. Loading is now false.`, "color: green; font-weight: bold;");
     }
   }, [fetchUserAppDataCallback]);
@@ -128,17 +130,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`%cAuthContext onAuthStateChanged: FIRED. FirebaseUser: ${firebaseUser ? firebaseUser.uid : 'null'}`, "color: teal; font-weight: bold;");
       if (firebaseUser) {
         setUser(firebaseUser);
-        // setLoading(true); // No need to set loading true here, fetchUserAppDataCallback will be called which might influence loading for specific scenarios or initial load
-        await fetchUserAppDataCallback(firebaseUser.uid); // Fetch profile and streak data
-        setLoading(false); // Set loading to false after user data has been fetched/attempted
+        // setLoading(true); // Already true or will be handled by fetchUserAppDataCallback
+        await fetchUserAppDataCallback(firebaseUser.uid);
         console.log(`%cAuthContext onAuthStateChanged: User ${firebaseUser.uid} processed. Loading set to false.`, "color: teal;");
       } else {
         setUser(null);
         setUserProfile(null);
         setStreakData(null);
-        setLoading(false);
         console.log("%cAuthContext onAuthStateChanged: No FirebaseUser. User, profile, streak set to null. Loading set to false.", "color: red;");
       }
+      setLoading(false); // Crucial: set loading to false after initial auth check
     });
 
     return () => {
@@ -170,4 +171,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
