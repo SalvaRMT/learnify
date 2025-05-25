@@ -7,19 +7,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale'; // Changed from require to import
+import { es } from 'date-fns/locale';
 
 export function StudyCalendarClient() {
-  const { streakData, loading: authLoading } = useAuth(); // Use streakData and loading from AuthContext
+  const { streakData, loading: authLoading } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
-  const completedOnSelectedDate = selectedDate && streakData?.completedDates.some(
+  console.log("[StudyCalendarClient] Render. AuthLoading:", authLoading, "StreakData:", streakData ? { ...streakData, completedDates: streakData.completedDates.map(d => d.toISOString()) } : null);
+
+  const completedOnSelectedDate = selectedDate && streakData?.completedDates && streakData.completedDates.some(
     d => d.getFullYear() === selectedDate.getFullYear() &&
          d.getMonth() === selectedDate.getMonth() &&
          d.getDate() === selectedDate.getDate()
   );
 
-  if (authLoading && !streakData) { // Show loading if auth is loading and streakData isn't available yet
+  if (authLoading && !streakData) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -28,7 +30,7 @@ export function StudyCalendarClient() {
   }
 
   if (!streakData) {
-    return <p className="text-center text-muted-foreground">No se pudieron cargar los datos del calendario.</p>;
+    return <p className="text-center text-muted-foreground">No se pudieron cargar los datos del calendario. Intenta refrescar o revisa tu conexión.</p>;
   }
   
   return (
@@ -44,7 +46,7 @@ export function StudyCalendarClient() {
             selected={selectedDate}
             onSelect={setSelectedDate}
             className="rounded-md border p-0"
-            modifiers={{ completed: streakData.completedDates }}
+            modifiers={{ completed: streakData.completedDates || [] }} // Asegurar que completedDates es un array
             modifiersStyles={{
                 completed: { 
                     color: 'hsl(var(--primary-foreground))',
@@ -56,8 +58,8 @@ export function StudyCalendarClient() {
               selectedDate && (
                 <p className="text-sm text-center pt-2">
                   {completedOnSelectedDate ? 
-                    `Completaste la práctica el ${format(selectedDate, 'PPP', { locale: es })}.` : // Used imported 'es'
-                    `No hay práctica registrada para el ${format(selectedDate, 'PPP', { locale: es })}.` // Used imported 'es'
+                    `Completaste la práctica el ${format(selectedDate, 'PPP', { locale: es })}.` :
+                    `No hay práctica registrada para el ${format(selectedDate, 'PPP', { locale: es })}.`
                   }
                 </p>
               )
