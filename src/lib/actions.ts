@@ -30,8 +30,6 @@ import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, get
 import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
-// import { signOut as firebaseSignOut } from 'firebase/auth'; 
-// import { auth } from "./firebaseConfig"; 
 
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
@@ -39,14 +37,14 @@ const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu co
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   // ====================================================================================
   // ¡¡¡ ATENCIÓN: ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO !!!
-  // Si esto falla con "permission-denied", es porque tus REGLAS DE SEGURIDAD de Firestore
-  // (en la Consola de Firebase) NO PERMITEN la operación 'read' en el documento
-  // '/users/{userId}' para el usuario autenticado.
+  // Si esto falla con "permission-denied" o similar, es porque tus REGLAS DE SEGURIDAD
+  // de Firestore (en la Consola de Firebase) NO PERMITEN la operación 'read' en el
+  // documento '/users/{userId}' para el usuario autenticado.
   //
   // La regla necesaria es:
   // service cloud.firestore {
   //   match /databases/{database}/documents {
-  //     match /users/{userId} { // ASEGÚRATE QUE LA COLECCIÓN ES 'users' Y NO 'lusers'
+  //     match /users/{userId} { // ASEGÚRATE QUE LA COLECCIÓN ES 'users' (o el nombre correcto)
   //       allow read: if request.auth.uid == userId;
   //       // ... otras reglas como create, update, delete ...
   //     }
@@ -55,7 +53,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   // ESTE PROBLEMA DEBE SOLUCIONARSE EN TUS REGLAS DE FIREBASE, NO EN ESTE CÓDIGO.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
-  const userCollectionName = "users"; // Asegúrate que esto coincide con tu base de datos
+  const userCollectionName = "users";
   const userDocPath = `${userCollectionName}/${userId}`;
   console.log(`${actionName} Attempting to get profile for userId: ${userId} from path: /${userDocPath}`);
 
@@ -130,6 +128,7 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
 export async function updateUserProfile(userId: string, values: Partial<UserProfile>) {
   const collectionName = "users";
   const actionName = "[updateUserProfile Server Action]";
+  console.log(`${actionName} Iniciando actualización de perfil para userId: ${userId} con valores:`, values);
   const dataToUpdate: { [key: string]: any } = {};
 
   if (values.fullName !== undefined) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
@@ -140,6 +139,7 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
   if (values.practiceTime !== undefined) dataToUpdate.practiceTime = Number(values.practiceTime);
 
   if (Object.keys(dataToUpdate).length === 0) {
+    console.log(`${actionName} No se detectaron cambios para actualizar para userId: ${userId}.`);
     return { success: "No hay cambios para actualizar." };
   }
   dataToUpdate.lastUpdatedAt = serverTimestamp();
@@ -215,7 +215,6 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
   const userCollectionName = "users";
   const actionName = "[recordPracticeSession Server Action]";
   
-  // Declarar aquí para que esté disponible en el catch block
   let todayNormalized = new Date();
   todayNormalized.setHours(0, 0, 0, 0);
   let todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
@@ -369,9 +368,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathAttempt = `'/users/${userId}/streaks/summary' o '/users/${userId}/dailyProgress/${todayDateStr}'`; // todayDateStr está disponible aquí
+      const specificPathAttempt = `'${userCollectionName}/${userId}/streaks/summary' O '${userCollectionName}/${userId}/dailyProgress/${todayDateStr}'`;
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ${specificPathAttempt}. Esto se configura dentro de 'match /users/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ${specificPathAttempt}. Esto se configura dentro de 'match /${userCollectionName}/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -421,17 +420,5 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
-
-// No necesitamos signOutUser aquí si se maneja en el cliente
-// export async function signOutUser() {
-//   // Esta función es problemática si se llama desde un server action usando el auth de cliente.
-//   // Es mejor manejar signOut directamente en el cliente.
-//   try {
-//     await firebaseSignOut(auth); // 'auth' aquí sería la instancia del servidor si se importara.
-//     return { success: "Sesión cerrada correctamente." };
-//   } catch (error: any) {
-//     return { error: error.message };
-//   }
-// }
 
     
