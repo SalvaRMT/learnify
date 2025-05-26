@@ -30,18 +30,20 @@ import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, get
 import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
+import { signOut as firebaseSignOut } from "firebase/auth"; // Importar signOut de firebase/auth
+import { auth } from "@/lib/firebaseConfig"; // Importar instancia auth del cliente
 
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
 
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   // ====================================================================================
-  // ¡¡¡ ATENCIÓN: ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO !!!
-  // Si esto falla con "permission-denied" o similar, es porque tus REGLAS DE SEGURIDAD
-  // de Firestore (en la Consola de Firebase) NO PERMITEN la operación 'read' en el
+  // ¡¡¡ ATENCIÓN: ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO DESDE EL SERVIDOR !!!
+  // Si esto falla con "permission-denied", es MUY PROBABLE que tus REGLAS DE SEGURIDAD
+  // de Firestore (en la Consola de Firebase) NO PERMITAN la operación 'read' en el
   // documento '/users/{userId}' para el usuario autenticado.
   //
-  // La regla necesaria es:
+  // LA REGLA NECESARIA en Firestore es:
   // service cloud.firestore {
   //   match /databases/{database}/documents {
   //     match /users/{userId} { // ASEGÚRATE QUE LA COLECCIÓN ES 'users' (o el nombre correcto)
@@ -50,10 +52,11 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   //     }
   //   }
   // }
-  // ESTE PROBLEMA DEBE SOLUCIONARSE EN TUS REGLAS DE FIREBASE, NO EN ESTE CÓDIGO.
+  // ESTE PROBLEMA DEBE SOLUCIONARSE EN TUS REGLAS DE FIREBASE, NO PRIMARIAMENTE EN ESTE CÓDIGO.
+  // El AuthContext ahora intenta leer esto desde el cliente, lo que hace esta acción de servidor menos crítica para ese flujo.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Consistent with Firebase console image
   const userDocPath = `${userCollectionName}/${userId}`;
   console.log(`${actionName} Attempting to get profile for userId: ${userId} from path: /${userDocPath}`);
 
@@ -111,7 +114,8 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
     await updateDoc(userDocRef, { practiceTime, lastUpdatedAt: serverTimestamp() });
     console.log(`${actionName} Tiempo de práctica guardado exitosamente para ${userId}.`);
     return { success: "¡Meta de práctica guardada!" };
-  } catch (error: any) {
+  } catch (error: any)
+ {
     console.error(`${actionName} Error al guardar el tiempo de práctica para ${userId} en /${userDocPath}:`, error.message, error.code);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
@@ -131,12 +135,12 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
   console.log(`${actionName} Iniciando actualización de perfil para userId: ${userId} con valores:`, values);
   const dataToUpdate: { [key: string]: any } = {};
 
-  if (values.fullName !== undefined) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
-  if (values.age !== undefined) {
-    dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
-  }
-  if (values.gender !== undefined) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
-  if (values.practiceTime !== undefined) dataToUpdate.practiceTime = Number(values.practiceTime);
+  // Only include fields that are actually provided in 'values'
+  if (values.hasOwnProperty('fullName')) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
+  if (values.hasOwnProperty('age')) dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
+  if (values.hasOwnProperty('gender')) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
+  if (values.hasOwnProperty('practiceTime')) dataToUpdate.practiceTime = Number(values.practiceTime);
+
 
   if (Object.keys(dataToUpdate).length === 0) {
     console.log(`${actionName} No se detectaron cambios para actualizar para userId: ${userId}.`);
@@ -212,7 +216,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Ensure this matches your actual collection name
   const actionName = "[recordPracticeSession Server Action]";
   
   let todayNormalized = new Date();
@@ -370,16 +374,15 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       const specificPathAttempt = `'${userCollectionName}/${userId}/streaks/summary' O '${userCollectionName}/${userId}/dailyProgress/${todayDateStr}'`;
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ${specificPathAttempt}. Esto se configura dentro de 'match /${userCollectionName}/{userId} { match /streaks/summary { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ${specificPathAttempt}. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
   }
 }
 
-
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Ensure this matches your actual collection name
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -415,10 +418,18 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
   } catch (error: any) {
     console.error(`${actionName} Error al obtener datos de racha para ${userId} desde '${streakSummaryPath}':`, error.message, error.code);
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad de Firestore. Necesitas 'allow read: if request.auth.uid == userId;' en 'match /${userCollectionName}/${userId}/streaks/summary { ... }'.`);
+      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad de Firestore. Necesitas 'allow read: if request.auth.uid == userId;' en 'match /${userCollectionName}/${userId}/streaks/{docId} { ... }'.`);
     }
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
 
-    
+export async function signOutUser() {
+  try {
+    await firebaseSignOut(auth); // Usar signOut del cliente directamente
+    return { success: "Cierre de sesión exitoso." };
+  } catch (error: any) {
+    console.error("Error al cerrar sesión (acción de servidor):", error);
+    return { error: `Error al cerrar sesión: ${error.message}` };
+  }
+}
