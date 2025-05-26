@@ -30,20 +30,21 @@ import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, get
 import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
-import { signOut as firebaseSignOut } from "firebase/auth"; // Importar signOut de firebase/auth
-import { auth } from "@/lib/firebaseConfig"; // Importar instancia auth del cliente
+// import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut } from "firebase/auth";
+import { auth } from "@/lib/firebaseConfig";
 
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
 
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   // ====================================================================================
-  // ¡¡¡ ATENCIÓN: ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO DESDE EL SERVIDOR !!!
-  // Si esto falla con "permission-denied", es MUY PROBABLE que tus REGLAS DE SEGURIDAD
-  // de Firestore (en la Consola de Firebase) NO PERMITAN la operación 'read' en el
-  // documento '/users/{userId}' para el usuario autenticado.
+  // ¡¡¡ ATENCIÓN DESARROLLADOR !!!
+  // ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO.
+  // Si esto falla con "permission-denied" o un mensaje similar, es MUY PROBABLE que tus
+  // REGLAS DE SEGURIDAD de Firestore (en la Consola de Firebase) NO PERMITAN la operación 'read'
+  // en el documento '/users/{userId}' para el usuario autenticado.
   //
-  // LA REGLA NECESARIA en Firestore es:
+  // LA REGLA NECESARIA en Firestore es algo como:
   // service cloud.firestore {
   //   match /databases/{database}/documents {
   //     match /users/{userId} { // ASEGÚRATE QUE LA COLECCIÓN ES 'users' (o el nombre correcto)
@@ -53,12 +54,12 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   //   }
   // }
   // ESTE PROBLEMA DEBE SOLUCIONARSE EN TUS REGLAS DE FIREBASE, NO PRIMARIAMENTE EN ESTE CÓDIGO.
-  // El AuthContext ahora intenta leer esto desde el cliente, lo que hace esta acción de servidor menos crítica para ese flujo.
+  // AuthContext.tsx ahora intenta leer el perfil directamente en el cliente, lo que puede ser más fiable.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
-  const userCollectionName = "users"; // Consistent with Firebase console image
+  const userCollectionName = "users";
   const userDocPath = `${userCollectionName}/${userId}`;
-  console.log(`${actionName} Attempting to get profile for userId: ${userId} from path: /${userDocPath}`);
+  console.log(`${actionName} Intentando obtener perfil para userId: ${userId} desde la ruta: /${userDocPath}`);
 
   try {
     const userDocRef = doc(db, userCollectionName, userId);
@@ -74,14 +75,14 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
         age: data.age === undefined || data.age === null ? '' : Number(data.age),
         gender: data.gender === undefined || data.gender === null ? '' : String(data.gender),
       };
-      console.log(`${actionName} Profile found for ${userId}.`);
+      console.log(`${actionName} Perfil encontrado para ${userId}.`);
       return { success: true, data: profile };
     } else {
-      console.log(`${actionName} Profile document NOT found for userId: ${userId} at /${userDocPath}`);
+      console.log(`${actionName} Documento de perfil NO encontrado para userId: ${userId} en /${userDocPath}`);
       return { success: false, error: "Perfil no encontrado." };
     }
   } catch (error: any) {
-    console.error(`${actionName} Error fetching profile for ${userId} from /${userDocPath}:`, error.message, error.code);
+    console.error(`${actionName} Error al obtener perfil para ${userId} desde /${userDocPath}:`, error.message, error.code);
     if (error.code === 'unavailable') {
       return { success: false, error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
@@ -135,7 +136,6 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
   console.log(`${actionName} Iniciando actualización de perfil para userId: ${userId} con valores:`, values);
   const dataToUpdate: { [key: string]: any } = {};
 
-  // Only include fields that are actually provided in 'values'
   if (values.hasOwnProperty('fullName')) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
   if (values.hasOwnProperty('age')) dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
   if (values.hasOwnProperty('gender')) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
@@ -216,7 +216,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const userCollectionName = "users"; // Ensure this matches your actual collection name
+  const userCollectionName = "users";
   const actionName = "[recordPracticeSession Server Action]";
   
   let todayNormalized = new Date();
@@ -224,8 +224,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
   let todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
 
   console.log(`${actionName} INICIO para userId: ${userId}, preguntasCorrectas: ${questionsAnsweredCorrectly}, temas:`, topicsCovered);
-  console.log(`${actionName} Fecha de hoy (normalizada para cálculos): ${todayNormalized.toISOString()}`);
-  console.log(`${actionName} String de fecha de hoy (para ID de documento de progreso diario): ${todayDateStr}`);
+  console.log(`${actionName} Fecha de hoy (normalizada para cálculos): ${todayNormalized.toISOString()}, String de fecha: ${todayDateStr}`);
 
   if (!userId) {
     console.error(`${actionName} Error: Falta userId.`);
@@ -239,7 +238,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   const dailyRecordPath = `${userCollectionName}/${userId}/dailyProgress/${todayDateStr}`;
-
+  
   console.log(`${actionName} Ruta para resumen de racha: ${streakSummaryPath}`);
   console.log(`${actionName} Ruta para progreso diario: ${dailyRecordPath}`);
 
@@ -372,9 +371,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathAttempt = `'${userCollectionName}/${userId}/streaks/summary' O '${userCollectionName}/${userId}/dailyProgress/${todayDateStr}'`;
+      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`; // todayDateStr está definido al inicio de la función.
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: ${specificPathAttempt}. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${specificPathAttempt}'. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -382,7 +381,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 }
 
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const userCollectionName = "users"; // Ensure this matches your actual collection name
+  const userCollectionName = "users"; 
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -424,12 +423,29 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
   }
 }
 
-export async function signOutUser() {
-  try {
-    await firebaseSignOut(auth); // Usar signOut del cliente directamente
-    return { success: "Cierre de sesión exitoso." };
-  } catch (error: any) {
-    console.error("Error al cerrar sesión (acción de servidor):", error);
-    return { error: `Error al cerrar sesión: ${error.message}` };
-  }
-}
+// Ya no se usa, pero se deja por si se reactiva lógica similar
+// export async function loginUser(values: z.infer<typeof LoginSchemaServer>) {
+//   // ... (código anterior de loginUser) ...
+// }
+
+// Ya no se usa, pero se deja por si se reactiva lógica similar
+// export async function signUpUser(values: z.infer<typeof SignUpSchemaServer>) {
+//   // ... (código anterior de signUpUser) ...
+// }
+
+// La función signOutUser ya no es necesaria aquí si el signOut se maneja 100% en el cliente.
+// Si se necesitara un signOut del servidor por alguna razón, se podría mantener.
+// Por ahora, la comentaré para evitar confusión, ya que ProfileForm.tsx usa signOut del cliente.
+// export async function signOutUser() {
+//   try {
+//     // Si se usara el Admin SDK en el backend, aquí se revocarían sesiones, etc.
+//     // Con el SDK de cliente, este signOut en el servidor no hace mucho si el cliente
+//     // ya maneja su propio signOut.
+//     // await firebaseSignOut(auth); // Esto usaría la instancia 'auth' del servidor
+//     console.log("[signOutUser Server Action] Called, but typically signOut is client-side for Firebase Web SDK.");
+//     return { success: "Cierre de sesión del servidor procesado (generalmente no necesario)." };
+//   } catch (error: any) {
+//     console.error("Error al cerrar sesión (acción de servidor):", error);
+//     return { error: `Error al cerrar sesión desde el servidor: ${error.message}` };
+//   }
+// }
