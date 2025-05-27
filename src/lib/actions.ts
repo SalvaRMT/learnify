@@ -27,7 +27,7 @@
 
 import { db } from "@/lib/firebaseConfig"; 
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod"; // Corrected from import type
+import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
 
@@ -43,6 +43,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   // O UN MENSAJE SIMILAR, ES CASI SEGURO QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE
   // (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules) NO PERMITEN
   // LA OPERACIÓN DE LECTURA ('read') EN EL DOCUMENTO '/users/{userId}'
+  // (o '/lusers/{userId}' si tu colección se llama así)
   // PARA EL USUARIO AUTENTICADO.
   //
   // LA REGLA DE SEGURIDAD NECESARIA EN FIRESTORE DEBE SER ALGO COMO:
@@ -62,7 +63,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   // si esta función falla por permisos.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
-  const userCollectionName = "users"; // Consistent with image
+  const userCollectionName = "users"; 
   const userDocPath = `${userCollectionName}/${userId}`;
   console.log(`${actionName} Intentando obtener perfil para userId: ${userId} desde la ruta: /${userDocPath}`);
 
@@ -100,7 +101,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
 
 
 export async function savePracticeTime(userId: string, values: { practiceTime: number }) {
-  const collectionName = "users"; // Consistent with image
+  const userCollectionName = "users"; 
   const PracticeTimeSchema = z.object({
     practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos por día."),
   });
@@ -111,12 +112,12 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
   }
 
   const { practiceTime } = validatedFields.data;
-  const userDocPath = `${collectionName}/${userId}`; 
+  const userDocPath = `${userCollectionName}/${userId}`; 
   const actionName = "[savePracticeTime Server Action]";
   console.log(`${actionName} Intentando actualizar practiceTime para userId: ${userId} en la ruta: /${userDocPath} con valor: ${practiceTime}`);
 
   try {
-    const userDocRef = doc(db, collectionName, userId); 
+    const userDocRef = doc(db, userCollectionName, userId); 
     await updateDoc(userDocRef, { practiceTime, lastUpdatedAt: serverTimestamp() });
     console.log(`${actionName} Tiempo de práctica guardado exitosamente para ${userId}.`);
     return { success: "¡Meta de práctica guardada!" };
@@ -128,7 +129,7 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       return {
-        error: `Error al guardar el tiempo de práctica: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore permitan la operación 'update' en el documento '/${collectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${collectionName}/{userId} { ... }'. (Código: ${error.code})`
+        error: `Error al guardar el tiempo de práctica: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore permitan la operación 'update' en el documento '/${userCollectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${userCollectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al guardar el tiempo de práctica: ${error.message}` };
@@ -136,13 +137,12 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
 }
 
 export async function updateUserProfile(userId: string, values: Partial<UserProfile>) {
-  const collectionName = "users"; // Consistent with image
+  const userCollectionName = "users"; 
   const actionName = "[updateUserProfile Server Action]";
   console.log(`${actionName} Iniciando actualización de perfil para userId: ${userId} con valores:`, values);
   
   const dataToUpdate: { [key: string]: any } = {};
 
-  // Only include fields that are actually present in `values`
   if (values.fullName !== undefined) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
   if (values.age !== undefined) dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
   if (values.gender !== undefined) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
@@ -155,11 +155,11 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
   }
   dataToUpdate.lastUpdatedAt = serverTimestamp();
 
-  const userDocPath = `${collectionName}/${userId}`; 
+  const userDocPath = `${userCollectionName}/${userId}`; 
   console.log(`${actionName} Intentando actualizar perfil para userId: ${userId} en la ruta: /${userDocPath} con datos:`, JSON.stringify(dataToUpdate));
 
   try {
-    const userDocRef = doc(db, collectionName, userId);
+    const userDocRef = doc(db, userCollectionName, userId);
     await updateDoc(userDocRef, dataToUpdate);
     console.log(`${actionName} Perfil actualizado exitosamente para ${userId}.`);
     return { success: "¡Perfil actualizado correctamente!" };
@@ -169,9 +169,8 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      // Corrected guidance in error message
       return {
-        error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${collectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${collectionName}/{userId} { ... }'. (Código: ${error.code})`
+        error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${userCollectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${userCollectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al actualizar el perfil: ${error.message}` };
@@ -205,7 +204,9 @@ export async function getPracticeQuestions(): Promise<Question[]> {
       return exampleQuestionsData; 
     }
 
+    // Shuffle questions
     const shuffledQuestions = allQuestions.sort(() => 0.5 - Math.random());
+    // Select up to 5 questions
     const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length));
 
     console.log(`${actionName} Seleccionadas ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore ('${collectionName}').`);
@@ -224,10 +225,9 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const userCollectionName = "users"; // Consistent with image
+  const userCollectionName = "users";
   const actionName = "[recordPracticeSession Server Action]";
   
-  // Declare todayNormalized and todayDateStr at a higher scope
   const todayNormalized = new Date();
   todayNormalized.setHours(0, 0, 0, 0);
   const todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
@@ -250,7 +250,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
   
   console.log(`${actionName} Ruta para resumen de racha: ${streakSummaryPath}`);
   console.log(`${actionName} Ruta para progreso diario: ${dailyRecordPath}`);
-
+  
   try {
     const streakSummaryRef = doc(db, userCollectionName, userId, "streaks", "summary");
     const dailyRecordRef = doc(db, userCollectionName, userId, "dailyProgress", todayDateStr);
@@ -297,7 +297,6 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
         lastPracticeDateJS.setHours(0,0,0,0); 
         const yesterdayNormalized = new Date(todayNormalized); 
         yesterdayNormalized.setDate(todayNormalized.getDate() - 1);
-        // yesterdayNormalized.setHours(0,0,0,0); // Already done when copying todayNormalized
 
         console.log(`${actionName} Comparando: lastPracticeDateJS=${lastPracticeDateJS.toISOString()}, yesterdayNormalized=${yesterdayNormalized.toISOString()}`);
 
@@ -380,10 +379,11 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`;
-      // Corrected error message guidance
+      const summaryPathExample = `users/${userId}/streaks/{docId}`; // docId aquí podría ser 'summary'
+      const dailyProgressPathExample = `users/${userId}/dailyProgress/{dateId}`; // dateId aquí sería la fecha
+      // CORREGIDO el mensaje de error para usar userId, docId, dateId correctamente.
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '/${userCollectionName}/{userId}/streaks/{docId}' Y '/${userCollectionName}/{userId}/dailyProgress/{dateId}'. Esto se configura dentro de 'match /${userCollectionName}/{userId} { match /streaks/{docId} { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/users/{userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/users/{userId}/dailyProgress/YYYY-MM-DD' (donde YYYY-MM-DD es la fecha) y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/{userId}'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -391,7 +391,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 }
 
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const userCollectionName = "users"; // Consistent with image
+  const userCollectionName = "users";
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -432,5 +432,3 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
-
-    
