@@ -25,36 +25,41 @@
 // =========================================================================================
 
 
-import { db } from "@/lib/firebaseConfig"; 
+import { db, auth as serverAuth } from "@/lib/firebaseConfig"; 
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
 import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
-// import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut } from "firebase/auth";
-import { auth } from "@/lib/firebaseConfig";
 
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
 
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   // ====================================================================================
-  // ¡¡¡ ATENCIÓN DESARROLLADOR !!!
-  // ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO.
-  // Si esto falla con "permission-denied" o un mensaje similar, es MUY PROBABLE que tus
-  // REGLAS DE SEGURIDAD de Firestore (en la Consola de Firebase) NO PERMITAN la operación 'read'
-  // en el documento '/users/{userId}' para el usuario autenticado.
+  // ¡¡¡ ATENCIÓN DESARROLLADOR: MENSAJE DE DIAGNÓSTICO CRÍTICO !!!
   //
-  // LA REGLA NECESARIA en Firestore es algo como:
+  // ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO DESDE FIRESTORE.
+  // SI ESTA OPERACIÓN FALLA CON UN ERROR DE "permission-denied", "permisos faltantes",
+  // O UN MENSAJE SIMILAR, ES CASI SEGURO QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE
+  // (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules) NO PERMITEN
+  // LA OPERACIÓN DE LECTURA ('read') EN EL DOCUMENTO '/users/{userId}'
+  // PARA EL USUARIO AUTENTICADO.
+  //
+  // LA REGLA DE SEGURIDAD NECESARIA EN FIRESTORE DEBE SER ALGO COMO:
   // service cloud.firestore {
   //   match /databases/{database}/documents {
-  //     match /users/{userId} { // ASEGÚRATE QUE LA COLECCIÓN ES 'users' (o el nombre correcto)
-  //       allow read: if request.auth.uid == userId;
+  //     match /users/{userId} { // ASEGÚRATE QUE EL NOMBRE DE LA COLECCIÓN ES 'users' (o el correcto)
+  //       allow read: if request.auth.uid == userId; // ESTA ES LA LÍNEA CLAVE PARA PERMITIR LA LECTURA DEL PERFIL
   //       // ... otras reglas como create, update, delete ...
   //     }
   //   }
   // }
-  // ESTE PROBLEMA DEBE SOLUCIONARSE EN TUS REGLAS DE FIREBASE, NO PRIMARIAMENTE EN ESTE CÓDIGO.
-  // AuthContext.tsx ahora intenta leer el perfil directamente en el cliente, lo que puede ser más fiable.
+  // ESTE PROBLEMA DEBE SOLUCIONARSE ACTUALIZANDO TUS REGLAS EN LA CONSOLA DE FIREBASE,
+  // NO PRIMARIAMENTE CAMBIANDO EL CÓDIGO DE ESTA FUNCIÓN.
+  // EL CÓDIGO YA ESTÁ INTENTANDO HACER LO CORRECTO.
+  //
+  // El AuthContext.tsx también tiene mensajes de diagnóstico en la consola del NAVEGADOR
+  // si esta función falla por permisos.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
   const userCollectionName = "users";
@@ -371,9 +376,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`; // todayDateStr está definido al inicio de la función.
+      const specificPathGuidance = `/users/${userId}/streaks/summary O /users/${userId}/dailyProgress/${todayDateStr}`;
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${specificPathAttempt}'. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${specificPathGuidance}'. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -422,30 +427,3 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
-
-// Ya no se usa, pero se deja por si se reactiva lógica similar
-// export async function loginUser(values: z.infer<typeof LoginSchemaServer>) {
-//   // ... (código anterior de loginUser) ...
-// }
-
-// Ya no se usa, pero se deja por si se reactiva lógica similar
-// export async function signUpUser(values: z.infer<typeof SignUpSchemaServer>) {
-//   // ... (código anterior de signUpUser) ...
-// }
-
-// La función signOutUser ya no es necesaria aquí si el signOut se maneja 100% en el cliente.
-// Si se necesitara un signOut del servidor por alguna razón, se podría mantener.
-// Por ahora, la comentaré para evitar confusión, ya que ProfileForm.tsx usa signOut del cliente.
-// export async function signOutUser() {
-//   try {
-//     // Si se usara el Admin SDK en el backend, aquí se revocarían sesiones, etc.
-//     // Con el SDK de cliente, este signOut en el servidor no hace mucho si el cliente
-//     // ya maneja su propio signOut.
-//     // await firebaseSignOut(auth); // Esto usaría la instancia 'auth' del servidor
-//     console.log("[signOutUser Server Action] Called, but typically signOut is client-side for Firebase Web SDK.");
-//     return { success: "Cierre de sesión del servidor procesado (generalmente no necesario)." };
-//   } catch (error: any) {
-//     console.error("Error al cerrar sesión (acción de servidor):", error);
-//     return { error: `Error al cerrar sesión desde el servidor: ${error.message}` };
-//   }
-// }
