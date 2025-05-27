@@ -25,9 +25,9 @@
 // =========================================================================================
 
 
-import { db, auth as serverAuth } from "@/lib/firebaseConfig"; 
+import { db } from "@/lib/firebaseConfig"; 
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod";
+import { z } from "zod"; // Corrected from import type
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
 
@@ -62,7 +62,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
   // si esta función falla por permisos.
   // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Consistent with image
   const userDocPath = `${userCollectionName}/${userId}`;
   console.log(`${actionName} Intentando obtener perfil para userId: ${userId} desde la ruta: /${userDocPath}`);
 
@@ -100,7 +100,7 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
 
 
 export async function savePracticeTime(userId: string, values: { practiceTime: number }) {
-  const collectionName = "users"; 
+  const collectionName = "users"; // Consistent with image
   const PracticeTimeSchema = z.object({
     practiceTime: z.coerce.number().min(5, "El tiempo de práctica debe ser de al menos 5 minutos por día."),
   });
@@ -136,15 +136,17 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
 }
 
 export async function updateUserProfile(userId: string, values: Partial<UserProfile>) {
-  const collectionName = "users";
+  const collectionName = "users"; // Consistent with image
   const actionName = "[updateUserProfile Server Action]";
   console.log(`${actionName} Iniciando actualización de perfil para userId: ${userId} con valores:`, values);
+  
   const dataToUpdate: { [key: string]: any } = {};
 
-  if (values.hasOwnProperty('fullName')) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
-  if (values.hasOwnProperty('age')) dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
-  if (values.hasOwnProperty('gender')) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
-  if (values.hasOwnProperty('practiceTime')) dataToUpdate.practiceTime = Number(values.practiceTime);
+  // Only include fields that are actually present in `values`
+  if (values.fullName !== undefined) dataToUpdate.fullName = values.fullName === "" ? null : values.fullName;
+  if (values.age !== undefined) dataToUpdate.age = values.age === '' || values.age === null ? null : Number(values.age);
+  if (values.gender !== undefined) dataToUpdate.gender = values.gender === "" || values.gender === null ? null : values.gender;
+  if (values.practiceTime !== undefined) dataToUpdate.practiceTime = Number(values.practiceTime);
 
 
   if (Object.keys(dataToUpdate).length === 0) {
@@ -167,6 +169,7 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
+      // Corrected guidance in error message
       return {
         error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${collectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${collectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
@@ -221,12 +224,13 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Consistent with image
   const actionName = "[recordPracticeSession Server Action]";
   
-  let todayNormalized = new Date();
+  // Declare todayNormalized and todayDateStr at a higher scope
+  const todayNormalized = new Date();
   todayNormalized.setHours(0, 0, 0, 0);
-  let todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
+  const todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
 
   console.log(`${actionName} INICIO para userId: ${userId}, preguntasCorrectas: ${questionsAnsweredCorrectly}, temas:`, topicsCovered);
   console.log(`${actionName} Fecha de hoy (normalizada para cálculos): ${todayNormalized.toISOString()}, String de fecha: ${todayDateStr}`);
@@ -293,7 +297,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
         lastPracticeDateJS.setHours(0,0,0,0); 
         const yesterdayNormalized = new Date(todayNormalized); 
         yesterdayNormalized.setDate(todayNormalized.getDate() - 1);
-        yesterdayNormalized.setHours(0,0,0,0); 
+        // yesterdayNormalized.setHours(0,0,0,0); // Already done when copying todayNormalized
 
         console.log(`${actionName} Comparando: lastPracticeDateJS=${lastPracticeDateJS.toISOString()}, yesterdayNormalized=${yesterdayNormalized.toISOString()}`);
 
@@ -376,9 +380,10 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathGuidance = `/users/${userId}/streaks/summary O /users/${userId}/dailyProgress/${todayDateStr}`;
+      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`;
+      // Corrected error message guidance
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '${specificPathGuidance}'. Esto se configura dentro de 'match /users/{userId} { match /streaks/{docId} { allow write: if request.auth.uid == userId; } match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; } }'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones: '/${userCollectionName}/{userId}/streaks/{docId}' Y '/${userCollectionName}/{userId}/dailyProgress/{dateId}'. Esto se configura dentro de 'match /${userCollectionName}/{userId} { match /streaks/{docId} { ... } match /dailyProgress/{dateId} { ... } }'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -386,7 +391,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 }
 
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const userCollectionName = "users"; 
+  const userCollectionName = "users"; // Consistent with image
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -427,3 +432,5 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
+
+    
