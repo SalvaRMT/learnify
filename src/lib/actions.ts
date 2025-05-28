@@ -34,34 +34,33 @@ import type { Question } from "@/components/practice/QuestionCard";
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
 
+// ====================================================================================
+// ¡¡¡ ATENCIÓN DESARROLLADOR: MENSAJE DE DIAGNÓSTICO CRÍTICO !!!
+//
+// ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO DESDE FIRESTORE.
+// SI ESTA OPERACIÓN FALLA CON UN ERROR DE "permission-denied", "permisos faltantes",
+// O UN MENSAJE SIMILAR, ES CASI SEGURO QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE
+// (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules) NO PERMITEN
+// LA OPERACIÓN DE LECTURA ('read') EN EL DOCUMENTO '/users/{userId}'
+// PARA EL USUARIO AUTENTICADO.
+//
+// LA REGLA DE SEGURIDAD NECESARIA EN FIRESTORE DEBE SER ALGO COMO:
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     match /users/{userId} { // ASEGÚRATE QUE EL NOMBRE DE LA COLECCIÓN ES 'users'
+//       allow read: if request.auth.uid == userId; // ESTA ES LA LÍNEA CLAVE PARA PERMITIR LA LECTURA DEL PERFIL
+//       // ... otras reglas como create, update, delete ...
+//     }
+//   }
+// }
+// ESTE PROBLEMA DEBE SOLUCIONARSE ACTUALIZANDO TUS REGLAS EN LA CONSOLA DE FIREBASE,
+// NO PRIMARIAMENTE CAMBIANDO EL CÓDIGO DE ESTA FUNCIÓN.
+// EL CÓDIGO YA ESTÁ INTENTANDO HACER LO CORRECTO.
+//
+// El AuthContext.tsx también tiene mensajes de diagnóstico en la consola del NAVEGADOR
+// si esta función falla por permisos.
+// ====================================================================================
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
-  // ====================================================================================
-  // ¡¡¡ ATENCIÓN DESARROLLADOR: MENSAJE DE DIAGNÓSTICO CRÍTICO !!!
-  //
-  // ESTA FUNCIÓN INTENTA LEER EL PERFIL DE USUARIO DESDE FIRESTORE.
-  // SI ESTA OPERACIÓN FALLA CON UN ERROR DE "permission-denied", "permisos faltantes",
-  // O UN MENSAJE SIMILAR, ES CASI SEGURO QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE
-  // (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules) NO PERMITEN
-  // LA OPERACIÓN DE LECTURA ('read') EN EL DOCUMENTO '/users/{userId}'
-  // (o '/lusers/{userId}' si tu colección se llama así)
-  // PARA EL USUARIO AUTENTICADO.
-  //
-  // LA REGLA DE SEGURIDAD NECESARIA EN FIRESTORE DEBE SER ALGO COMO:
-  // service cloud.firestore {
-  //   match /databases/{database}/documents {
-  //     match /users/{userId} { // ASEGÚRATE QUE EL NOMBRE DE LA COLECCIÓN ES 'users' (o el correcto)
-  //       allow read: if request.auth.uid == userId; // ESTA ES LA LÍNEA CLAVE PARA PERMITIR LA LECTURA DEL PERFIL
-  //       // ... otras reglas como create, update, delete ...
-  //     }
-  //   }
-  // }
-  // ESTE PROBLEMA DEBE SOLUCIONARSE ACTUALIZANDO TUS REGLAS EN LA CONSOLA DE FIREBASE,
-  // NO PRIMARIAMENTE CAMBIANDO EL CÓDIGO DE ESTA FUNCIÓN.
-  // EL CÓDIGO YA ESTÁ INTENTANDO HACER LO CORRECTO.
-  //
-  // El AuthContext.tsx también tiene mensajes de diagnóstico en la consola del NAVEGADOR
-  // si esta función falla por permisos.
-  // ====================================================================================
   const actionName = "[getUserProfile Server Action]";
   const userCollectionName = "users"; 
   const userDocPath = `${userCollectionName}/${userId}`;
@@ -169,6 +168,7 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
+      // Mensaje de error corregido para usar userId correctamente
       return {
         error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${userCollectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${userCollectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
@@ -204,9 +204,7 @@ export async function getPracticeQuestions(): Promise<Question[]> {
       return exampleQuestionsData; 
     }
 
-    // Shuffle questions
     const shuffledQuestions = allQuestions.sort(() => 0.5 - Math.random());
-    // Select up to 5 questions
     const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length));
 
     console.log(`${actionName} Seleccionadas ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore ('${collectionName}').`);
@@ -379,11 +377,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const summaryPathExample = `users/${userId}/streaks/{docId}`; // docId aquí podría ser 'summary'
-      const dailyProgressPathExample = `users/${userId}/dailyProgress/{dateId}`; // dateId aquí sería la fecha
-      // CORREGIDO el mensaje de error para usar userId, docId, dateId correctamente.
+      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`;
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/users/{userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/users/{userId}/dailyProgress/YYYY-MM-DD' (donde YYYY-MM-DD es la fecha) y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/{userId}'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/users/${userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/users/${userId}/dailyProgress/${todayDateStr}' y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/${userId}'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -432,3 +428,5 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
+
+    
