@@ -30,7 +30,8 @@ import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, get
 import { z } from "zod";
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
-
+import { signOut as firebaseSignOut } from "firebase/auth"; // Client-side sign out
+import { auth } from "@/lib/firebaseConfig"; // Client-side auth instance
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
 
@@ -168,7 +169,6 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      // Mensaje de error corregido para usar userId correctamente
       return {
         error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${userCollectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${userCollectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
@@ -226,6 +226,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
   const userCollectionName = "users";
   const actionName = "[recordPracticeSession Server Action]";
   
+  // Define todayNormalized and todayDateStr at the function scope
   const todayNormalized = new Date();
   todayNormalized.setHours(0, 0, 0, 0);
   const todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
@@ -360,9 +361,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     }, 2));
     
     const batch = writeBatch(db);
-    console.log(`${actionName} Añadiendo al batch: SET en '${streakSummaryPath}'`);
+    console.log(`${actionName} Añadiendo al batch: SET en '${streakSummaryRef.path}'`);
     batch.set(streakSummaryRef, dataForSummary, { merge: true }); 
-    console.log(`${actionName} Añadiendo al batch: SET en '${dailyRecordPath}'`);
+    console.log(`${actionName} Añadiendo al batch: SET en '${dailyRecordRef.path}'`);
     batch.set(dailyRecordRef, dataForDaily, { merge: true }); 
 
     console.log(`${actionName} DATOS PREPARADOS PARA BATCH. Intentando hacer BATCH.COMMIT()`);
@@ -377,9 +378,10 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      const specificPathAttempt = `users/${userId}/streaks/summary O users/${userId}/dailyProgress/${todayDateStr}`;
+      const streakPathForError = `users/${userId}/streaks/summary`;
+      const dailyProgressPathForError = `users/${userId}/dailyProgress/${todayDateStr}`; // todayDateStr is defined at the top
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/users/${userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/users/${userId}/dailyProgress/${todayDateStr}' y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/${userId}'. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '${streakPathForError}' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '${dailyProgressPathForError}' (donde ${todayDateStr} es la fecha actual) y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/{userId}'. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -428,5 +430,3 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
-
-    
