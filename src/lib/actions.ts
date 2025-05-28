@@ -25,12 +25,12 @@
 // =========================================================================================
 
 
-import { db, auth as clientAuth } from "@/lib/firebaseConfig"; 
+import { db, auth as clientAuth, firebaseConfig } from "@/lib/firebaseConfig"; 
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, getDocs, writeBatch, Timestamp, limit } from "firebase/firestore";
-import { z } from "zod"; // Asegúrate que la importación no sea 'import type'
+import { z } from "zod"; 
 import type { UserProfile, StreakData } from "@/types";
 import type { Question } from "@/components/practice/QuestionCard";
-import { signOut as firebaseClientSignOut } from "firebase/auth"; 
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseClientSignOut } from "firebase/auth"; 
 
 
 const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu conexión a internet. Además, asegúrate de que Firestore esté habilitado e inicializado en la consola de tu proyecto de Firebase.";
@@ -44,29 +44,27 @@ const UNAVAILABLE_ERROR_MESSAGE = "Operación fallida. Por favor, verifica tu co
 // O UN MENSAJE SIMILAR, ES CASI SEGURO QUE TUS REGLAS DE SEGURIDAD DE FIRESTORE
 // (EN LA CONSOLA DE FIREBASE -> Firestore Database -> Rules) NO PERMITEN
 // LA OPERACIÓN DE LECTURA ('read') EN EL DOCUMENTO '/users/{userId}'
-// PARA EL USUARIO AUTENTICADO.
+// (O '/lusers/{userId}' SI ASÍ SE LLAMA TU COLECCIÓN) PARA EL USUARIO AUTENTICADO.
 //
 // LA REGLA DE SEGURIDAD NECESARIA EN FIRESTORE DEBE SER ALGO COMO:
 // service cloud.firestore {
 //   match /databases/{database}/documents {
-//     match /users/{userId} { // ASEGÚRATE QUE EL NOMBRE DE LA COLECCIÓN ES 'users'
-//       allow read: if request.auth.uid == userId; // ESTA ES LA LÍNEA CLAVE PARA PERMITIR LA LECTURA DEL PERFIL
+//     match /users/{userId} { // ASEGÚRATE QUE EL NOMBRE DE LA COLECCIÓN ES 'users' (O EL QUE USES)
+//       allow read: if request.auth.uid == userId; // ESTA ES LA LÍNEA CLAVE
 //       // ... otras reglas como create, update, delete ...
 //     }
 //   }
 // }
 // ESTE PROBLEMA DEBE SOLUCIONARSE ACTUALIZANDO TUS REGLAS EN LA CONSOLA DE FIREBASE,
 // NO PRIMARIAMENTE CAMBIANDO EL CÓDIGO DE ESTA FUNCIÓN.
-// EL CÓDIGO YA ESTÁ INTENTANDO HACER LO CORRECTO.
 //
 // El AuthContext.tsx también tiene mensajes de diagnóstico en la consola del NAVEGADOR
 // si esta función falla por permisos.
 // ====================================================================================
 export async function getUserProfile(userId: string): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
-  const actionName = "[getUserProfile Server Action]";
   const userCollectionName = "users"; 
-  const userDocPath = `${userCollectionName}/${userId}`;
-  console.log(`${actionName} Intentando obtener perfil para userId: ${userId} desde la ruta: /${userDocPath}`);
+  const actionName = "[getUserProfile Server Action]";
+  console.log(`${actionName} Intentando obtener perfil para userId: ${userId} desde la ruta: /${userCollectionName}/${userId}`);
 
   try {
     const userDocRef = doc(db, userCollectionName, userId);
@@ -85,11 +83,11 @@ export async function getUserProfile(userId: string): Promise<{ success: boolean
       console.log(`${actionName} Perfil encontrado para ${userId}.`);
       return { success: true, data: profile };
     } else {
-      console.log(`${actionName} Documento de perfil NO encontrado para userId: ${userId} en /${userDocPath}`);
+      console.log(`${actionName} Documento de perfil NO encontrado para userId: ${userId} en /${userCollectionName}/${userId}`);
       return { success: false, error: "Perfil no encontrado." };
     }
   } catch (error: any) {
-    console.error(`${actionName} Error al obtener perfil para ${userId} desde /${userDocPath}:`, error.message, error.code);
+    console.error(`${actionName} Error al obtener perfil para ${userId} desde /${userCollectionName}/${userId}:`, error.message, error.code);
     if (error.code === 'unavailable') {
       return { success: false, error: `${UNAVAILABLE_ERROR_MESSAGE} (Code: ${error.code})` };
     }
@@ -122,8 +120,7 @@ export async function savePracticeTime(userId: string, values: { practiceTime: n
     await updateDoc(userDocRef, { practiceTime, lastUpdatedAt: serverTimestamp() });
     console.log(`${actionName} Tiempo de práctica guardado exitosamente para ${userId}.`);
     return { success: "¡Meta de práctica guardada!" };
-  } catch (error: any)
- {
+  } catch (error: any) {
     console.error(`${actionName} Error al guardar el tiempo de práctica para ${userId} en /${userDocPath}:`, error.message, error.code);
     if (error.code === 'unavailable') {
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
@@ -171,7 +168,6 @@ export async function updateUserProfile(userId: string, values: Partial<UserProf
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
       return {
-        // MENSAJE CORREGIDO PARA LA GUÍA
         error: `Error al actualizar el perfil: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan la operación 'update' en el documento '/${userCollectionName}/${userId}' para el usuario autenticado. La regla común es 'allow update: if request.auth.uid == userId;' dentro de 'match /${userCollectionName}/{userId} { ... }'. (Código: ${error.code})`
       };
     }
@@ -206,8 +202,9 @@ export async function getPracticeQuestions(): Promise<Question[]> {
       return exampleQuestionsData; 
     }
 
+    // Seleccionar aleatoriamente hasta 5 preguntas
     const shuffledQuestions = allQuestions.sort(() => 0.5 - Math.random());
-    const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length));
+    const selectedQuestions = shuffledQuestions.slice(0, Math.min(5, shuffledQuestions.length)); // Asegura que no exceda la cantidad disponible
 
     console.log(`${actionName} Seleccionadas ${selectedQuestions.length} preguntas de ${allQuestions.length} disponibles en Firestore ('${collectionName}').`);
     return selectedQuestions;
@@ -225,15 +222,16 @@ export async function getPracticeQuestions(): Promise<Question[]> {
 }
 
 export async function recordPracticeSession(userId: string, questionsAnsweredCorrectly: number, topicsCovered: string[]) {
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Asegúrate de que esta sea tu colección real
   const actionName = "[recordPracticeSession Server Action]";
-  
+
+  // Normalizar la fecha actual a la medianoche para comparaciones y almacenamiento consistentes
   const todayNormalized = new Date();
   todayNormalized.setHours(0, 0, 0, 0);
   const todayDateStr = `${todayNormalized.getFullYear()}-${String(todayNormalized.getMonth() + 1).padStart(2, '0')}-${String(todayNormalized.getDate()).padStart(2, '0')}`;
 
   console.log(`${actionName} INICIO para userId: ${userId}, preguntasCorrectas: ${questionsAnsweredCorrectly}, temas:`, topicsCovered);
-  console.log(`${actionName} Fecha de hoy (normalizada para cálculos): ${todayNormalized.toISOString()}, String de fecha: ${todayDateStr}`);
+  console.log(`${actionName} Fecha de hoy (normalizada para cálculos): ${todayNormalized.toISOString()}, String de fecha para dailyProgress: ${todayDateStr}`);
 
   if (!userId) {
     console.error(`${actionName} Error: Falta userId.`);
@@ -317,6 +315,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
         console.log(`${actionName} Nueva racha más larga: ${newLongestStreak}`);
       }
       
+      // Solo añadir si realmente no está (aunque practiceDayAlreadyRecorded ya lo cubre)
       if (!newCompletedDatesJS.find(d => d.getTime() === todayNormalized.getTime())) {
         newCompletedDatesJS.push(new Date(todayNormalized.getTime())); 
         console.log(`${actionName} Hoy añadido a completedDates. Total días completados ahora: ${newCompletedDatesJS.length}, nueva fecha: ${todayNormalized.toISOString()}`);
@@ -328,29 +327,31 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     const newSummaryTotalQuestions = summaryTotalQuestions + questionsAnsweredCorrectly;
     console.log(`${actionName} Total de preguntas respondidas actualizado: ${newSummaryTotalQuestions}`);
 
-    const uniqueCompletedDatesTimestamps = Array.from(new Set(newCompletedDatesJS.map(d => d.getTime())))
-                                          .map(time => Timestamp.fromDate(new Date(time)));
+    // Asegurar que solo se guardan Timestamps únicos
+    const uniqueCompletedDatesTimestamps = Array.from(new Set(newCompletedDatesJS.map(d => d.getTime()))) // Obtener tiempos únicos
+                                          .map(time => Timestamp.fromDate(new Date(time))); // Convertir de nuevo a Timestamps
 
     const dataForSummary = {
       currentStreak: newCurrentStreak,
       longestStreak: newLongestStreak,
       totalQuestionsAnswered: newSummaryTotalQuestions,
-      lastPracticeDate: Timestamp.fromDate(newLastPracticeDateJS), 
+      lastPracticeDate: Timestamp.fromDate(newLastPracticeDateJS), // Usar la fecha normalizada de hoy
       completedDates: uniqueCompletedDatesTimestamps 
     };
-    console.log(`${actionName} DATOS PARA ESCRIBIR en resumen de racha ('${streakSummaryPath}'):`, JSON.stringify(dataForSummary, null, 2));
+    console.log(`${actionName} DATOS PARA ESCRIBIR en resumen de racha ('${streakSummaryPath}'):`, JSON.stringify(dataForSummary, (key, value) => key === 'completedDates' ? `${value.length} Timestamps` : value , 2));
     
 
     console.log(`${actionName} Intentando LEER el progreso diario desde: ${dailyRecordPath}`);
     const dailyProgressSnap = await getDoc(dailyRecordRef);
     const existingDailyQuestions = dailyProgressSnap.exists() ? (dailyProgressSnap.data()!.questionsAnswered || 0) : 0;
     const existingTopics = dailyProgressSnap.exists() ? (dailyProgressSnap.data()!.topics || []) : [];
+    // Asegurar que los temas sean únicos
     const updatedTopics = Array.from(new Set([...existingTopics, ...topicsCovered]));
 
     const dataForDaily = {
       questionsAnswered: existingDailyQuestions + questionsAnsweredCorrectly,
       topics: updatedTopics,
-      date: Timestamp.fromDate(todayNormalized), 
+      date: Timestamp.fromDate(todayNormalized), // Usar la fecha normalizada de hoy
     };
     console.log(`${actionName} DATOS PARA ESCRIBIR en progreso diario ('${dailyRecordPath}'):`, JSON.stringify(dataForDaily, null, 2));
     
@@ -360,7 +361,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
     console.log(`${actionName} Añadiendo al batch: SET en '${dailyRecordRef.path}'`);
     batch.set(dailyRecordRef, dataForDaily, { merge: true }); 
 
-    console.log(`${actionName} DATOS PREPARADOS PARA BATCH. Intentando hacer BATCH.COMMIT()`);
+    console.log(`${actionName} DATOS PREPARADOS PARA BATCH. Intentando hacer BATCH.COMMIT()...`);
     await batch.commit();
     console.log(`${actionName} FIN: Batch commit exitoso para UID: ${userId}.`);
     return { success: "¡Sesión de práctica registrada!" };
@@ -372,9 +373,9 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
       return { error: `${UNAVAILABLE_ERROR_MESSAGE} (Código: ${error.code})` };
     }
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      // MENSAJE DE ERROR CORREGIDO Y PRECISO
+      // Mensaje de error corregido para guiar correctamente sobre userId, docId, dateId
       return {
-        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir (ej: 'allow write: if request.auth != null && request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/${userCollectionName}/${userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth != null && request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/${userCollectionName}/${userId}/dailyProgress/${todayDateStr}' (donde ${todayDateStr} es la fecha actual) y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth != null && request.auth.uid == userId; }'. Ambas anidadas bajo 'match /${userCollectionName}/{userId}'. Si las reglas son correctas, verifica el contexto de autenticación de la Acción de Servidor. (Código: ${error.code})`
+        error: `Error al registrar la sesión: PERMISOS DENEGADOS. Asegúrate de que tus reglas de seguridad de Firestore (en Firestore -> Reglas) permitan escribir ('allow write: if request.auth.uid == userId;') en las subcolecciones. Para el resumen de rachas, la ruta es '/users/${userId}/streaks/summary' y la regla debería ser similar a 'match /streaks/{docId} { allow write: if request.auth.uid == userId; }'. Para el progreso diario, la ruta es '/users/${userId}/dailyProgress/${todayDateStr}' (donde ${todayDateStr} es la fecha actual) y la regla 'match /dailyProgress/{dateId} { allow write: if request.auth.uid == userId; }'. Ambas anidadas bajo 'match /users/{userId}'. Si las reglas son correctas, verifica el contexto de autenticación de la Acción de Servidor. (Código: ${error.code})`
       };
     }
     return { error: `Error al registrar la sesión: ${error.message}` };
@@ -382,7 +383,7 @@ export async function recordPracticeSession(userId: string, questionsAnsweredCor
 }
 
 export async function getStudyStreakData(userId: string): Promise<StreakData> {
-  const userCollectionName = "users";
+  const userCollectionName = "users"; // Asegúrate que sea 'users'
   const actionName = "[getStudyStreakData Server Action]";
   const streakSummaryPath = `${userCollectionName}/${userId}/streaks/summary`;
   console.log(`${actionName} Intentando obtener datos de racha para userId: ${userId} desde '${streakSummaryPath}'`);
@@ -398,7 +399,7 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
       
       const completedDatesJS: Date[] = completedDatesFirestoreTimestamps.map((ts: Timestamp) => {
         const date = ts.toDate();
-        date.setHours(0, 0, 0, 0); 
+        date.setHours(0, 0, 0, 0); // Normalizar a la medianoche
         return date;
       });
 
@@ -408,36 +409,36 @@ export async function getStudyStreakData(userId: string): Promise<StreakData> {
         currentStreak: data.currentStreak || 0,
         longestStreak: data.longestStreak || 0,
         totalQuestionsAnswered: data.totalQuestionsAnswered || 0,
-        completedDates: completedDatesJS, 
+        completedDates: completedDatesJS, // Usar las fechas JS normalizadas
       };
       return streakDataResult;
     } else {
       console.log(`${actionName} No se encontró resumen de racha para ${userId} en ${streakSummaryPath}. Devolviendo valores por defecto.`);
+      // Devolver una estructura válida de StreakData con valores por defecto
       return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
     }
   } catch (error: any) {
     console.error(`${actionName} Error al obtener datos de racha para ${userId} desde '${streakSummaryPath}':`, error.message, error.code);
     if (error.code === 'permission-denied' || error.code === 'PERMISSION_DENIED') {
-      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad de Firestore. Necesitas 'allow read: if request.auth.uid == userId;' en 'match /${userCollectionName}/${userId}/streaks/{docId} { ... }'.`);
+      console.error(`${actionName} PERMISO DENEGADO al leer '${streakSummaryPath}'. Revisa tus reglas de seguridad de Firestore. Necesitas 'allow read: if request.auth.uid == userId;' en 'match /${userCollectionName}/${userId}/streaks/{docId} { ... }' (donde docId sería 'summary').`);
     }
+    // Devolver una estructura válida de StreakData con valores por defecto en caso de error
     return { currentStreak: 0, longestStreak: 0, totalQuestionsAnswered: 0, completedDates: [] };
   }
 }
 
 
 export async function signOutUser() {
+  // Esta función de servidor es solo un placeholder si se necesitara lógica de servidor al cerrar sesión.
+  // El cierre de sesión real y la limpieza del estado del cliente ocurren en ProfileForm.tsx
+  // usando firebaseClientSignOut.
   const actionName = "[signOutUser Server Action]";
   try {
-    // NOTA: Esto es un signOut del lado del servidor. El cliente también necesita manejar el signOut
-    // y la limpieza del estado local. Actualmente, ProfileForm.tsx maneja el signOut del cliente.
-    // Esta función podría ser útil si se necesita invalidar sesiones desde el servidor.
-    // Por ahora, no se usa activamente desde el ProfileForm.tsx.
-    console.log(`${actionName} Intento de cierre de sesión (no implementado activamente del lado del servidor para invalidación).`);
-    // await adminAuth.revokeRefreshTokens(userId); // Ejemplo si se usara Admin SDK
-    return { success: "Cierre de sesión del servidor (simulado) exitoso." };
+    console.log(`${actionName} Intento de cierre de sesión (manejado principalmente en el cliente).`);
+    return { success: "Cierre de sesión del servidor (simulado) procesado." };
   } catch (error: any) {
     console.error(`${actionName} Error:`, error);
-    return { error: "Error al cerrar sesión en el servidor." };
+    return { error: "Error al procesar el cierre de sesión en el servidor." };
   }
 }
 
